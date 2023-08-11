@@ -2,7 +2,6 @@
 using System.Reflection;
 using System.Text;
 using InheritedMapper;
-using TimesheetServices.HelperServices;
 
 namespace ITBees.ApiToTypescriptGenerator
 {
@@ -175,7 +174,7 @@ namespace ITBees.ApiToTypescriptGenerator
                 case var type when type == typeof(Guid) || type == typeof(Guid?):
                     return $"{typescriptDefinition}: string";
                 case var type when type == typeof(DateTime) || type == typeof(DateTime?):
-                    return $"{typescriptDefinition}: date";
+                    return $"{typescriptDefinition}: Date";
 
                 default:
                     return $"{piPropertyType.Name.ToLowerFirstChar()}: ***undefined***";

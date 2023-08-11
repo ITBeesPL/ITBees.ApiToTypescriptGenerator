@@ -1,8 +1,4 @@
-﻿using System.Collections.Generic;
-using System;
-using System.Linq;
-
-namespace TimesheetServices.HelperServices
+﻿namespace ITBees.ApiToTypescriptGenerator
 {
     public static class StringHelpers
     {
