@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Remove="C:\Users\kuba\.nuget\packages\itbeespl.inheritedmapper\5.0.10\contentFiles\any\net5.0\ITBeesOOPLogo.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ITBees.RestfulApiControllers" Version="5.0.3" />
+    <PackageReference Include="ITBeesPL.InheritedMapper" Version="5.0.10" />
+  </ItemGroup>
+
+</Project>
