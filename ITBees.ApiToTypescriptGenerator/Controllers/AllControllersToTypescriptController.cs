@@ -33,27 +33,27 @@ public class AllControllersToTypescriptController : RestfulControllerBase<AllCon
         var actionDescriptorCollectionProvider = _serviceProvider.GetRequiredService<IActionDescriptorCollectionProvider>();
         var sb = new StringBuilder();
         var typeScriptGenerator = new TypeScriptGenerator();
-        
+
         foreach (var actionDescriptor in actionDescriptorCollectionProvider.ActionDescriptors.Items)
         {
             if (actionDescriptor is ControllerActionDescriptor controllerActionDescriptor)
             {
-                sb.AppendLine("---Controller-----------------------------");
-                sb.AppendLine($"Controller: {controllerActionDescriptor.ControllerName}, Action: {controllerActionDescriptor.ActionName}");
+                sb.AppendLine($"[Controller /{controllerActionDescriptor.ControllerName}]");
+                sb.AppendLine($"Action: {controllerActionDescriptor.ActionName}");
 
 
                 var producesAttribute = controllerActionDescriptor.MethodInfo.GetCustomAttribute<ProducesAttribute>();
-                sb.AppendLine("---Produces-------------------------------");
+                sb.AppendLine("\tProduces :");
                 if (producesAttribute != null && producesAttribute.Type != null)
                 {
-                    
-                    sb.AppendLine($"    Produces Type: {producesAttribute.Type}");
-                    sb.AppendLine(typeScriptGenerator.Generate(producesAttribute.Type.ToString(), new TypeScriptGeneratedModels()).ToString());
+
+                    sb.AppendLine($"\tProduces Type: {producesAttribute.Type.Name}");
+                    sb.AppendLine("***\r\n" + typeScriptGenerator.Generate(producesAttribute.Type.Name, new TypeScriptGeneratedModels()) + "***\r\n");
                 }
-                sb.AppendLine("---Input parameters-----------------------");
+                sb.AppendLine($"[Controller /{controllerActionDescriptor.ControllerName} request type : {controllerActionDescriptor.ActionName}]");
                 foreach (var parameter in controllerActionDescriptor.Parameters)
                 {
-                    sb.AppendLine($"    Parameter: {parameter.Name}, Type: {parameter.ParameterType}");
+                    sb.AppendLine($"\t\tParameter: {parameter.Name}, Type: {parameter.ParameterType}");
                 }
             }
         }
