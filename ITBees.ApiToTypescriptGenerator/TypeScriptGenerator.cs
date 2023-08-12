@@ -170,7 +170,7 @@ namespace ITBees.ApiToTypescriptGenerator
                 case var type when type == typeof(decimal) || type == typeof(decimal?):
                     return $"{typescriptDefinition}: number";
                 case var type when type == typeof(Boolean) || type == typeof(Boolean?):
-                    return $"{typescriptDefinition}: bool";
+                    return $"{typescriptDefinition}: boolean";
                 case var type when type == typeof(Guid) || type == typeof(Guid?):
                     return $"{typescriptDefinition}: string";
                 case var type when type == typeof(DateTime) || type == typeof(DateTime?):
@@ -197,26 +197,6 @@ namespace ITBees.ApiToTypescriptGenerator
 
             var model = RemoveLastSpecialSign(sb) + "\r\n}\r\n";
             typescirptTypeScriptGeneratedModels.AddNewObject(new TypescriptModel(model, pi.Name));
-        }
-    }
-
-    public static class Extension
-    {
-        public static bool IsCollectionType(this Type type)
-        {
-            return typeof(IEnumerable).IsAssignableFrom(type) && type != typeof(string);
-        }
-        public static object GetMemberValue(this MemberInfo member, object forObject)
-        {
-            switch (member)
-            {
-                case FieldInfo mfi:
-                    return mfi.GetValue(forObject);
-                case PropertyInfo mpi:
-                    return mpi.GetValue(forObject, null);
-                default:
-                    throw new ArgumentException("MemberInfo must be of type FieldInfo or PropertyInfo", nameof(member));
-            }
         }
     }
 }
