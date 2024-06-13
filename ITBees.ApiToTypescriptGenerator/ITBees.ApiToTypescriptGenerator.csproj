@@ -14,7 +14,7 @@
   <ItemGroup>
     <PackageReference Include="ITBees.Interfaces" Version="8.0.11" />
     <PackageReference Include="ITBees.RestfulApiControllers" Version="8.0.5" />
-    <PackageReference Include="ITBeesPL.InheritedMapper" Version="8.0.14" />
+    <PackageReference Include="ITBeesPL.InheritedMapper" Version="8.0.15" />
   </ItemGroup>
 
   <ItemGroup>
