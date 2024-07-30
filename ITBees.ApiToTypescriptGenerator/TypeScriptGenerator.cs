@@ -12,6 +12,10 @@ namespace ITBees.ApiToTypescriptGenerator
             PropertyInfo currentPi = null;
             try
             {
+                if (viewModelName == "FileContentResult")
+                {
+                    return null;
+                }
                 var sb = new StringBuilder();
                 Type type = null;
                 Assembly[] asmblies = AppDomain.CurrentDomain.GetAssemblies();

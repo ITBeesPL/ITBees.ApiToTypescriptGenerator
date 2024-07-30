@@ -50,11 +50,35 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
                         sb.AppendLine("\tProduces :");
                         if (producesAttribute != null && producesAttribute.Type != null)
                         {
-                            sb.AppendLine($"\tProduces Type: {producesAttribute.Type.Name}");
+                            var producedType = producesAttribute.Type;
 
-                            var typeScriptGeneratedModel = new TypeScriptFile(typeScriptGenerator.Generate(producesAttribute.Type.Name, new TypeScriptGeneratedModels()).ToString(), producesAttribute.Type.Name);
-                            generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
-                            sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
+                            // Handle List<>
+                            if (producedType.IsGenericType && producedType.GetGenericTypeDefinition() == typeof(List<>))
+                            {
+                                var itemType = producedType.GetGenericArguments()[0];
+                                sb.AppendLine($"\tProduces Type: List<{itemType.Name}>");
+
+                                if (CheckOutputTypeIsHandledByGeneratr(itemType, sb))
+                                {
+                                    var typeScriptGeneratedModel = new TypeScriptFile(
+                                        typeScriptGenerator.Generate(itemType.Name, new TypeScriptGeneratedModels()).ToString(),
+                                        itemType.Name);
+                                    generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
+                                    sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
+                                }
+                            }
+                            else
+                            {
+                                sb.AppendLine($"\tProduces Type: {producedType.Name}");
+                                if (CheckOutputTypeIsHandledByGeneratr(producedType, sb))
+                                {
+                                    var typeScriptGeneratedModel = new TypeScriptFile(
+                                        typeScriptGenerator.Generate(producedType.Name, new TypeScriptGeneratedModels()).ToString(),
+                                        producedType.Name);
+                                    generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
+                                    sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
+                                }
+                            }
                         }
                         sb.AppendLine($"[Controller /{controllerActionDescriptor.ControllerName} request type : {controllerActionDescriptor.ActionName}]");
                         foreach (var parameter in controllerActionDescriptor.Parameters)
@@ -74,6 +98,21 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
         }
 
         return new AllTypescriptModels(sb.ToString(), zipBytes);
+    }
+
+    private List<string> _exludedTypesFromGenerationInTypeScript = new List<string>()
+    {
+        "FileContentResult"
+    };
+    private bool CheckOutputTypeIsHandledByGeneratr(Type producesAttributeType, StringBuilder sb)
+    {
+        if (_exludedTypesFromGenerationInTypeScript.Contains(producesAttributeType.Name))
+        {
+            sb.AppendLine($"Not handled type in typescript generator {producesAttributeType.Name}");
+            return false;
+        }
+
+        return true;
     }
 
     private void AddEntryToZipArchive(ZipArchive zipArchive, string fileName, string fileContent)

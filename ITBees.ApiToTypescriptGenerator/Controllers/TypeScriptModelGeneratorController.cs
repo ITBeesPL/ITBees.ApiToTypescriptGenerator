@@ -15,8 +15,8 @@ namespace ITBees.ApiToTypescriptGenerator.Controllers
         {
             _logger = logger;
         }
-        
-        [Produces(typeof(string))]
+
+        [Produces(typeof(TypeScriptModelsVm))]
         [HttpGet]
         public ActionResult<string> Get(string viewModelName)
         {
@@ -24,7 +24,7 @@ namespace ITBees.ApiToTypescriptGenerator.Controllers
             {
                 var typeScriptGenerator = new TypeScriptGenerator();
                 var result = typeScriptGenerator.Generate(viewModelName, new TypeScriptGeneratedModels());
-                return Ok(result.ToString());
+                return Ok(new TypeScriptModelsVm() { Models = result.ToString() });
             }
             catch (Exception e)
             {
