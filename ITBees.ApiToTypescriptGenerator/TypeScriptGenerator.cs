@@ -100,6 +100,13 @@ namespace ITBees.ApiToTypescriptGenerator
                         continue;
                     }
 
+                    if (pi.PropertyType == typeof(long) || pi.PropertyType == typeof(long?))
+                    {
+                        var propertyIsNullable = pi.PropertyType == typeof(long?);
+                        sb.AppendLine($"    {GetTypescriptTypeFromPrimitive(pi, propertyIsNullable)},");
+                        continue;
+                    }
+
                     if (pi.PropertyType == typeof(DateTime) || pi.PropertyType == typeof(DateTime?))
                     {
                         var propertyIsNullable = pi.PropertyType == typeof(DateTime?);
@@ -181,6 +188,8 @@ namespace ITBees.ApiToTypescriptGenerator
                 case var type when type == typeof(Int32) || type == typeof(Int32?):
                     return $"{typescriptDefinition}: number";
                 case var type when type == typeof(decimal) || type == typeof(decimal?):
+                    return $"{typescriptDefinition}: number";
+                case var type when type == typeof(long) || type == typeof(long?):
                     return $"{typescriptDefinition}: number";
                 case var type when type == typeof(Boolean) || type == typeof(Boolean?):
                     return $"{typescriptDefinition}: boolean";
