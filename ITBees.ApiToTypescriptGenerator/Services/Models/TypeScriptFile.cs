@@ -16,10 +16,18 @@ public class TypeScriptFile
         if (fileName == "")
         {
 
-            FileName = $"{ConvertToTypescriptFileNameConvention(typeName)}.model.ts";
+            FileName = GetTypescriptFileName(typeName);
         }
     }
 
+    public static string GetTypescriptFileName(string typeName)
+    {
+        return $"{ConvertToTypescriptFileNameConvention(typeName)}.model.ts";
+    }
+    public static string GetTypescriptFileNameWithoutTs(string typeName)
+    {
+        return $"{ConvertToTypescriptFileNameConvention(typeName)}.model";
+    }
     public static string ConvertToTypescriptFileNameConvention(string typeName)
     {
         return Regex.Replace(typeName, "([a-z](?=[A-Z])|[A-Z](?=[A-Z][a-z]))", "$1-").ToLower();

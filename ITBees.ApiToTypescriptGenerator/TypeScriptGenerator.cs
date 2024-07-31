@@ -2,12 +2,13 @@
 using System.Reflection;
 using System.Text;
 using InheritedMapper;
+using ITBees.ApiToTypescriptGenerator.Services.Models;
 
 namespace ITBees.ApiToTypescriptGenerator
 {
     public class TypeScriptGenerator
     {
-        public TypeScriptGeneratedModels Generate(string viewModelName, TypeScriptGeneratedModels x)
+        public TypeScriptGeneratedModels Generate(string viewModelName, TypeScriptGeneratedModels x, bool skipChildGeneration)
         {
             PropertyInfo currentPi = null;
             try
@@ -29,8 +30,8 @@ namespace ITBees.ApiToTypescriptGenerator
                     {
                         type = assembly.GetTypes().FirstOrDefault(x => x.Name == viewModelName);
                     }
-                    
-                    var format = string.Join(";", assembly.GetTypes().Select(x=>x.FullName));
+
+                    var format = string.Join(";", assembly.GetTypes().Select(x => x.FullName));
                     Console.WriteLine(format);
                     if (type == null)
                         continue;
@@ -44,7 +45,7 @@ namespace ITBees.ApiToTypescriptGenerator
                 }
 
                 var instance = Activator.CreateInstance(type);
-                if (viewModelName.Contains("ViewModel") || viewModelName.Contains("UpdateModel") || viewModelName.Contains("InputModel")|| viewModelName.Trim().EndsWith("Dto") )
+                if (viewModelName.Contains("ViewModel") || viewModelName.Contains("UpdateModel") || viewModelName.Contains("InputModel") || viewModelName.Trim().EndsWith("Dto"))
                 {
                     sb.AppendLine($"export interface I{RemoveViewModelDecorator(viewModelName)} {(char)123}");
                 }
@@ -119,7 +120,7 @@ namespace ITBees.ApiToTypescriptGenerator
                                 continue;
                             }
                         }
-                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{removeViewModelDecorator.ToLowerFirstChar()}[],");
+                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{removeViewModelDecorator.ToUpperFirstChar()}[],");
                         childViewModels.Add(pi.PropertyType.GetGenericArguments().First());
                         continue;
                     }
@@ -137,12 +138,20 @@ namespace ITBees.ApiToTypescriptGenerator
 
                 var trimEnd = RemoveLastSpecialSign(sb);
 
-                x.AddNewObject(new TypescriptModel(trimEnd + "\r\n}\r\n", viewModelName));
-
+                var typescriptModel = new TypescriptModel(trimEnd + "\r\n}\r\n", viewModelName);
+                x.AddNewObject(typescriptModel);
+                var sbImports = new StringBuilder();
                 foreach (var childViewModel in childViewModels)
                 {
-                    Generate(childViewModel.Name, x);
+                    Generate(childViewModel.Name, x, true);
+                    var import =
+                        $"import {{ I{childViewModel.Name} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childViewModel.Name)}';";
+                    if (sbImports.ToString().Contains(import) == false)
+                    {
+                        sbImports.AppendLine(import);
+                    }
                 }
+                typescriptModel.SetModel(sbImports + typescriptModel.Model);
             }
             catch (Exception e)
             {
@@ -163,7 +172,7 @@ namespace ITBees.ApiToTypescriptGenerator
             var typescriptDefinition = $"{piPropertyType.Name.ToLowerFirstChar()}{nullableSign}";
             switch (piPropertyType.PropertyType)
             {
-                case var type when type == typeof(String) :
+                case var type when type == typeof(String):
                     return $"{typescriptDefinition}: string";
                 case var type when type == typeof(string):
                     return $"{typescriptDefinition}: string";

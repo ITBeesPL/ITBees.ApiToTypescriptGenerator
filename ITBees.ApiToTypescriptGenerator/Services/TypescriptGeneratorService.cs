@@ -1,4 +1,5 @@
-﻿using System.IO.Compression;
+﻿using System.Collections.Generic;
+using System.IO.Compression;
 using System.Reflection;
 using System.Text;
 using ITBees.ApiToTypescriptGenerator.Interfaces;
@@ -53,6 +54,8 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
                             var producedType = producesAttribute.Type;
 
                             // Handle List<>
+                            TypeScriptGeneratedModels typeScriptGeneratedModels = null;
+                            TypeScriptFile typeScriptGeneratedModel = null;
                             if (producedType.IsGenericType && producedType.GetGenericTypeDefinition() == typeof(List<>))
                             {
                                 var itemType = producedType.GetGenericArguments()[0];
@@ -60,11 +63,10 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
 
                                 if (CheckOutputTypeIsHandledByGeneratr(itemType, sb))
                                 {
-                                    var typeScriptGeneratedModel = new TypeScriptFile(
-                                        typeScriptGenerator.Generate(itemType.Name, new TypeScriptGeneratedModels()).ToString(),
+                                    typeScriptGeneratedModels = typeScriptGenerator.Generate(itemType.Name, new TypeScriptGeneratedModels(), false);
+                                    typeScriptGeneratedModel = new TypeScriptFile(
+                                        typeScriptGeneratedModels.ToString(),
                                         itemType.Name);
-                                    generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
-                                    sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
                                 }
                             }
                             else
@@ -72,13 +74,29 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
                                 sb.AppendLine($"\tProduces Type: {producedType.Name}");
                                 if (CheckOutputTypeIsHandledByGeneratr(producedType, sb))
                                 {
-                                    var typeScriptGeneratedModel = new TypeScriptFile(
-                                        typeScriptGenerator.Generate(producedType.Name, new TypeScriptGeneratedModels()).ToString(),
+                                    typeScriptGeneratedModels = typeScriptGenerator.Generate(producedType.Name, new TypeScriptGeneratedModels(), true);
+
+                                    typeScriptGeneratedModel = new TypeScriptFile(
+                                        typeScriptGeneratedModels.ToString(),
                                         producedType.Name);
-                                    generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
-                                    sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
                                 }
                             }
+
+                            if (typeScriptGeneratedModel != null)
+                            {
+                                generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName,
+                                    typeScriptGeneratedModel);
+                                sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
+                                foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedOjects)
+                                {
+                                    if (generatedTypescriptModels.ContainsKey(typescriptModel.ClassType) == false)
+                                    {
+                                        generatedTypescriptModels.TryAdd(typescriptModel.ClassType,
+                                            new TypeScriptFile(typescriptModel.Model, typescriptModel.ClassType));
+                                    }
+                                }
+                            }
+
                         }
                         sb.AppendLine($"[Controller /{controllerActionDescriptor.ControllerName} request type : {controllerActionDescriptor.ActionName}]");
                         foreach (var parameter in controllerActionDescriptor.Parameters)

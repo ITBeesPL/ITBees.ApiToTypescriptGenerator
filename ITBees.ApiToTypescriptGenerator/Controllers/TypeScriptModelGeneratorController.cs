@@ -23,7 +23,7 @@ namespace ITBees.ApiToTypescriptGenerator.Controllers
             try
             {
                 var typeScriptGenerator = new TypeScriptGenerator();
-                var result = typeScriptGenerator.Generate(viewModelName, new TypeScriptGeneratedModels());
+                var result = typeScriptGenerator.Generate(viewModelName, new TypeScriptGeneratedModels(),false);
                 return Ok(new TypeScriptModelsVm() { Models = result.ToString() });
             }
             catch (Exception e)
