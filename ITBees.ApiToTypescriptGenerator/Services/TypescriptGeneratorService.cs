@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ApplicationParts;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ITBees.ApiToTypescriptGenerator.Services;
@@ -46,13 +47,13 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
                         sb.AppendLine($"[Controller /{controllerActionDescriptor.ControllerName}]");
                         sb.AppendLine($"Action: {controllerActionDescriptor.ActionName}");
 
+                        // Handle ProducesAttribute
                         var producesAttribute = controllerActionDescriptor.MethodInfo.GetCustomAttribute<ProducesAttribute>();
                         sb.AppendLine("\tProduces :");
                         if (producesAttribute != null && producesAttribute.Type != null)
                         {
                             var producedType = producesAttribute.Type;
 
-                            // Handle List<>
                             TypeScriptGeneratedModels typeScriptGeneratedModels = null;
                             TypeScriptFile typeScriptGeneratedModel = null;
                             if (producedType.IsGenericType && producedType.GetGenericTypeDefinition() == typeof(List<>))
@@ -95,12 +96,63 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
                                     }
                                 }
                             }
-
                         }
+
                         sb.AppendLine($"[Controller /{controllerActionDescriptor.ControllerName} request type : {controllerActionDescriptor.ActionName}]");
+
+                        // Handle parameters
                         foreach (var parameter in controllerActionDescriptor.Parameters)
                         {
                             sb.AppendLine($"\t\tParameter: {parameter.Name}, Type: {parameter.ParameterType}");
+
+                            // Handle FromBody parameters
+                            if (parameter.BindingInfo != null && parameter.BindingInfo.BindingSource == BindingSource.Body)
+                            {
+                                var parameterType = parameter.ParameterType;
+
+                                TypeScriptGeneratedModels typeScriptGeneratedModels = null;
+                                TypeScriptFile typeScriptGeneratedModel = null;
+                                if (parameterType.IsGenericType && parameterType.GetGenericTypeDefinition() == typeof(List<>))
+                                {
+                                    var itemType = parameterType.GetGenericArguments()[0];
+                                    sb.AppendLine($"\tParameter Type: List<{itemType.Name}>");
+
+                                    if (CheckOutputTypeIsHandledByGeneratr(itemType, sb))
+                                    {
+                                        typeScriptGeneratedModels = typeScriptGenerator.Generate(itemType.Name, new TypeScriptGeneratedModels(), false);
+                                        typeScriptGeneratedModel = new TypeScriptFile(
+                                            typeScriptGeneratedModels.ToString(),
+                                            itemType.Name);
+                                    }
+                                }
+                                else
+                                {
+                                    sb.AppendLine($"\tParameter Type: {parameterType.Name}");
+                                    if (CheckOutputTypeIsHandledByGeneratr(parameterType, sb))
+                                    {
+                                        typeScriptGeneratedModels = typeScriptGenerator.Generate(parameterType.Name, new TypeScriptGeneratedModels(), true);
+
+                                        typeScriptGeneratedModel = new TypeScriptFile(
+                                            typeScriptGeneratedModels.ToString(),
+                                            parameterType.Name);
+                                    }
+                                }
+
+                                if (typeScriptGeneratedModel != null)
+                                {
+                                    generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName,
+                                        typeScriptGeneratedModel);
+                                    sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
+                                    foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedOjects)
+                                    {
+                                        if (generatedTypescriptModels.ContainsKey(typescriptModel.ClassType) == false)
+                                        {
+                                            generatedTypescriptModels.TryAdd(typescriptModel.ClassType,
+                                                new TypeScriptFile(typescriptModel.Model, typescriptModel.ClassType));
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -116,6 +168,7 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
 
         return new AllTypescriptModels(sb.ToString(), zipBytes);
     }
+
 
     private List<string> _exludedTypesFromGenerationInTypeScript = new List<string>()
     {
