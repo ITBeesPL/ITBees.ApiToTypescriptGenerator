@@ -1,5 +1,4 @@
-﻿using System.Collections.Generic;
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Reflection;
 using System.Text;
 using ITBees.ApiToTypescriptGenerator.Interfaces;
