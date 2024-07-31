@@ -1,5 +1,4 @@
-﻿using ITBees.ApiToTypescriptGenerator.Services;
-using ITBees.ApiToTypescriptGenerator.Services.Models;
+﻿using ITBees.ApiToTypescriptGenerator.Services.Models;
 
 namespace ITBees.ApiToTypescriptGenerator.Interfaces;
 
