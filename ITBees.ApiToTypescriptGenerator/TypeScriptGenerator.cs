@@ -62,7 +62,8 @@ namespace ITBees.ApiToTypescriptGenerator
                 {
                     var genericArgs = type.GetGenericArguments();
                     genericArguments = "<" + string.Join(", ", genericArgs.Select(a => "I" + RemoveViewModelDecorator(a.Name))) + ">";
-                    interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
+                    // Removed the problematic line
+                    // interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
                 }
 
                 sb.AppendLine($"export interface I{interfaceName}{genericArguments} {{");
