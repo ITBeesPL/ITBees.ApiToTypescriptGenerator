@@ -56,17 +56,22 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
 
                             TypeScriptGeneratedModels typeScriptGeneratedModels = null;
                             TypeScriptFile typeScriptGeneratedModel = null;
-                            if (producedType.IsGenericType && producedType.GetGenericTypeDefinition() == typeof(List<>))
-                            {
-                                var itemType = producedType.GetGenericArguments()[0];
-                                sb.AppendLine($"\tProduces Type: List<{itemType.Name}>");
 
-                                if (CheckOutputTypeIsHandledByGeneratr(itemType, sb))
+                            if (producedType.IsGenericType)
+                            {
+                                var genericTypeDefinition = producedType.GetGenericTypeDefinition();
+                                var genericTypeArguments = producedType.GetGenericArguments();
+                                sb.AppendLine($"\tProduces Type: {genericTypeDefinition.Name}<{string.Join(", ", genericTypeArguments.Select(t => t.Name))}>");
+
+                                if (CheckOutputTypeIsHandledByGeneratr(genericTypeDefinition, sb))
                                 {
-                                    typeScriptGeneratedModels = typeScriptGenerator.Generate(itemType.Name, new TypeScriptGeneratedModels(), false);
+                                    // Generate the TypeScript model with generic type arguments
+                                    typeScriptGeneratedModels = typeScriptGenerator.Generate(genericTypeDefinition.Name, new TypeScriptGeneratedModels(), false, genericTypeArguments);
+
+                                    var interfaceName = GetInterfaceName(genericTypeDefinition, genericTypeArguments);
                                     typeScriptGeneratedModel = new TypeScriptFile(
                                         typeScriptGeneratedModels.ToString(),
-                                        itemType.Name);
+                                        interfaceName);
                                 }
                             }
                             else
@@ -84,15 +89,13 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
 
                             if (typeScriptGeneratedModel != null)
                             {
-                                generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName,
-                                    typeScriptGeneratedModel);
+                                generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
                                 sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
-                                foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedOjects)
+                                foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
                                 {
-                                    if (generatedTypescriptModels.ContainsKey(typescriptModel.ClassType) == false)
+                                    if (!generatedTypescriptModels.ContainsKey(typescriptModel.ClassType))
                                     {
-                                        generatedTypescriptModels.TryAdd(typescriptModel.ClassType,
-                                            new TypeScriptFile(typescriptModel.Model, typescriptModel.ClassType));
+                                        generatedTypescriptModels.TryAdd(typescriptModel.ClassType, new TypeScriptFile(typescriptModel.Model, typescriptModel.ClassType));
                                     }
                                 }
                             }
@@ -112,17 +115,22 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
 
                                 TypeScriptGeneratedModels typeScriptGeneratedModels = null;
                                 TypeScriptFile typeScriptGeneratedModel = null;
-                                if (parameterType.IsGenericType && parameterType.GetGenericTypeDefinition() == typeof(List<>))
-                                {
-                                    var itemType = parameterType.GetGenericArguments()[0];
-                                    sb.AppendLine($"\tParameter Type: List<{itemType.Name}>");
 
-                                    if (CheckOutputTypeIsHandledByGeneratr(itemType, sb))
+                                if (parameterType.IsGenericType)
+                                {
+                                    var genericTypeDefinition = parameterType.GetGenericTypeDefinition();
+                                    var genericTypeArguments = parameterType.GetGenericArguments();
+                                    sb.AppendLine($"\tParameter Type: {genericTypeDefinition.Name}<{string.Join(", ", genericTypeArguments.Select(t => t.Name))}>");
+
+                                    if (CheckOutputTypeIsHandledByGeneratr(genericTypeDefinition, sb))
                                     {
-                                        typeScriptGeneratedModels = typeScriptGenerator.Generate(itemType.Name, new TypeScriptGeneratedModels(), false);
+                                        // Generate the TypeScript model with generic type arguments
+                                        typeScriptGeneratedModels = typeScriptGenerator.Generate(genericTypeDefinition.Name, new TypeScriptGeneratedModels(), false, genericTypeArguments);
+
+                                        var interfaceName = GetInterfaceName(genericTypeDefinition, genericTypeArguments);
                                         typeScriptGeneratedModel = new TypeScriptFile(
                                             typeScriptGeneratedModels.ToString(),
-                                            itemType.Name);
+                                            interfaceName);
                                     }
                                 }
                                 else
@@ -140,15 +148,13 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
 
                                 if (typeScriptGeneratedModel != null)
                                 {
-                                    generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName,
-                                        typeScriptGeneratedModel);
+                                    generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
                                     sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
-                                    foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedOjects)
+                                    foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
                                     {
-                                        if (generatedTypescriptModels.ContainsKey(typescriptModel.ClassType) == false)
+                                        if (!generatedTypescriptModels.ContainsKey(typescriptModel.ClassType))
                                         {
-                                            generatedTypescriptModels.TryAdd(typescriptModel.ClassType,
-                                                new TypeScriptFile(typescriptModel.Model, typescriptModel.ClassType));
+                                            generatedTypescriptModels.TryAdd(typescriptModel.ClassType, new TypeScriptFile(typescriptModel.Model, typescriptModel.ClassType));
                                         }
                                     }
                                 }
@@ -168,6 +174,36 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
 
         return new AllTypescriptModels(sb.ToString(), zipBytes);
     }
+
+    // Helper method to generate interface name based on generic type arguments
+    private string GetInterfaceName(Type genericTypeDefinition, Type[] genericTypeArguments)
+    {
+        var baseName = RemoveViewModelDecorator(genericTypeDefinition.Name);
+        if (baseName.Contains('`'))
+        {
+            baseName = baseName.Substring(0, baseName.IndexOf('`'));
+        }
+        var typeArgumentNames = genericTypeArguments.Select(t => RemoveViewModelDecorator(t.Name));
+        var interfaceName = baseName + string.Join("", typeArgumentNames);
+        return interfaceName;
+    }
+
+    // Adjust the RemoveViewModelDecorator method if needed
+    private string RemoveViewModelDecorator(string viewModelName)
+    {
+        // Remove generic arity if present
+        if (viewModelName.Contains('`'))
+        {
+            viewModelName = viewModelName.Substring(0, viewModelName.IndexOf('`'));
+        }
+
+        return viewModelName
+            .Replace("ViewModel", "")
+            .Replace("UpdateModel", "")
+            .Replace("InputModel", "")
+            .Replace("Dto", "");
+    }
+
 
 
     private List<string> _exludedTypesFromGenerationInTypeScript = new List<string>()

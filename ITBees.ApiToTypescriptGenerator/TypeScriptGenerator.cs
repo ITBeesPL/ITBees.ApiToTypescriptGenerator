@@ -11,7 +11,7 @@ namespace ITBees.ApiToTypescriptGenerator
 {
     public class TypeScriptGenerator
     {
-        public TypeScriptGeneratedModels Generate(string viewModelName, TypeScriptGeneratedModels x, bool skipChildGeneration)
+        public TypeScriptGeneratedModels Generate(string viewModelName, TypeScriptGeneratedModels x, bool skipChildGeneration, Type[] genericTypeArguments = null)
         {
             PropertyInfo currentPi = null;
             try
@@ -57,20 +57,33 @@ namespace ITBees.ApiToTypescriptGenerator
 
                 // Handle generic types
                 string interfaceName = RemoveViewModelDecorator(type.Name);
-                string genericArguments = string.Empty;
                 if (type.IsGenericType)
                 {
-                    var genericArgs = type.GetGenericArguments();
-                    genericArguments = "<" + string.Join(", ", genericArgs.Select(a => "I" + RemoveViewModelDecorator(a.Name))) + ">";
-                    // Removed the problematic line
-                    // interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
+                    if (genericTypeArguments != null)
+                    {
+                        // Create a closed generic type with the provided generic type arguments
+                        type = type.MakeGenericType(genericTypeArguments);
+                        interfaceName = RemoveViewModelDecorator(type.Name);
+                        // Remove ` symbol and generic arity
+                        if (interfaceName.Contains('`'))
+                        {
+                            interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
+                        }
+                        // Append the type arguments to the interface name to make it unique
+                        var typeArgumentNames = genericTypeArguments.Select(t => RemoveViewModelDecorator(t.Name));
+                        interfaceName += string.Join("", typeArgumentNames);
+                    }
+                    else
+                    {
+                        // Cannot proceed without generic type arguments
+                        throw new Exception($"Generic type arguments required for type {viewModelName}.");
+                    }
                 }
 
-                sb.AppendLine($"export interface I{interfaceName}{genericArguments} {{");
+                sb.AppendLine($"export interface I{interfaceName} {{");
 
                 var childViewModels = new List<Type>();
 
-                // We cannot create an instance of an open generic type
                 var properties = type.GetProperties();
 
                 foreach (PropertyInfo pi in properties)
@@ -78,13 +91,6 @@ namespace ITBees.ApiToTypescriptGenerator
                     currentPi = pi;
 
                     Type propertyType = pi.PropertyType;
-
-                    // Handle generic type parameters
-                    if (propertyType.IsGenericParameter)
-                    {
-                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {propertyType.Name};");
-                        continue;
-                    }
 
                     // Handle nullable types
                     bool isNullable = IsNullableType(propertyType);
@@ -110,13 +116,6 @@ namespace ITBees.ApiToTypescriptGenerator
                     {
                         Type itemType = GetCollectionItemType(propertyType);
 
-                        // Handle generic type parameters in collections
-                        if (itemType.IsGenericParameter)
-                        {
-                            sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {itemType.Name}[];");
-                            continue;
-                        }
-
                         if (IsPrimitiveType(itemType))
                         {
                             var tsType = GetTypescriptTypeFromType(itemType);
@@ -125,8 +124,19 @@ namespace ITBees.ApiToTypescriptGenerator
                         else
                         {
                             var childInterfaceName = RemoveViewModelDecorator(itemType.Name);
+
+                            // If itemType is generic parameter, use its name directly
+                            if (itemType.IsGenericParameter)
+                            {
+                                childInterfaceName = itemType.Name;
+                            }
+                            else
+                            {
+                                // Generate the model for itemType
+                                Generate(itemType.Name, x, true);
+                            }
+
                             sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName}[];");
-                            childViewModels.Add(itemType);
                         }
                         continue;
                     }
@@ -135,8 +145,19 @@ namespace ITBees.ApiToTypescriptGenerator
                     if (propertyType.IsClass)
                     {
                         var childInterfaceName = RemoveViewModelDecorator(propertyType.Name);
+
+                        // If propertyType is generic parameter, use its name directly
+                        if (propertyType.IsGenericParameter)
+                        {
+                            childInterfaceName = propertyType.Name;
+                        }
+                        else
+                        {
+                            // Generate the model for propertyType
+                            Generate(propertyType.Name, x, true);
+                        }
+
                         sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName};");
-                        childViewModels.Add(propertyType);
                         continue;
                     }
 
@@ -148,33 +169,13 @@ namespace ITBees.ApiToTypescriptGenerator
                 x.AddNewObject(typescriptModel);
 
                 var sbImports = new StringBuilder();
-                foreach (var childViewModel in childViewModels)
+                // Handle imports for child models
+                foreach (var childViewModel in x.GeneratedModels.Select(m => m.TypeName).Distinct())
                 {
-                    Generate(childViewModel.Name, x, true);
-                    var importLine = $"import {{ I{RemoveViewModelDecorator(childViewModel.Name)} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childViewModel.Name)}';";
-                    if (!sbImports.ToString().Contains(importLine))
+                    var importLine = $"import {{ I{childViewModel} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childViewModel)}';";
+                    if (!sbImports.ToString().Contains(importLine) && childViewModel != interfaceName)
                     {
                         sbImports.AppendLine(importLine);
-                    }
-                }
-
-                // Handle generic arguments imports
-                if (type.IsGenericType)
-                {
-                    var genericArgs = type.GetGenericArguments();
-                    foreach (var arg in genericArgs)
-                    {
-                        if (arg.IsGenericParameter)
-                        {
-                            // Do nothing for generic parameters
-                            continue;
-                        }
-                        Generate(arg.Name, x, true);
-                        var importLine = $"import {{ I{RemoveViewModelDecorator(arg.Name)} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(arg.Name)}';";
-                        if (!sbImports.ToString().Contains(importLine))
-                        {
-                            sbImports.AppendLine(importLine);
-                        }
                     }
                 }
 
@@ -189,12 +190,17 @@ namespace ITBees.ApiToTypescriptGenerator
 
         private string RemoveViewModelDecorator(string viewModelName)
         {
+            // Remove generic arity if present
+            if (viewModelName.Contains('`'))
+            {
+                viewModelName = viewModelName.Substring(0, viewModelName.IndexOf('`'));
+            }
+
             return viewModelName
                 .Replace("ViewModel", "")
                 .Replace("UpdateModel", "")
                 .Replace("InputModel", "")
-                .Replace("Dto", "")
-                .Split('`')[0]; // Remove generic arity
+                .Replace("Dto", "");
         }
 
         private bool IsNullableType(Type type)
