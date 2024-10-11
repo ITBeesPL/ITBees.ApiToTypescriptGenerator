@@ -1,4 +1,7 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using InheritedMapper;
@@ -31,8 +34,6 @@ namespace ITBees.ApiToTypescriptGenerator
                         type = assembly.GetTypes().FirstOrDefault(x => x.Name == viewModelName);
                     }
 
-                    var format = string.Join(";", assembly.GetTypes().Select(x => x.FullName));
-                    Console.WriteLine(format);
                     if (type == null)
                         continue;
 
@@ -44,118 +45,74 @@ namespace ITBees.ApiToTypescriptGenerator
                     break;
                 }
 
+                if (type == null)
+                {
+                    throw new Exception($"Type {viewModelName} not found.");
+                }
+
                 var instance = Activator.CreateInstance(type);
-                if (viewModelName.Contains("ViewModel") || viewModelName.Contains("UpdateModel") || viewModelName.Contains("InputModel") || viewModelName.Trim().EndsWith("Dto"))
-                {
-                    sb.AppendLine($"export interface I{RemoveViewModelDecorator(viewModelName)} {(char)123}");
-                }
-                else
-                {
-                    sb.AppendLine($"export interface I{viewModelName} {(char)123}");
-                }
+                var interfaceName = RemoveViewModelDecorator(viewModelName);
+                sb.AppendLine($"export interface I{interfaceName} {{");
 
                 var childViewModels = new List<Type>();
                 foreach (PropertyInfo pi in instance.GetType().GetProperties())
                 {
                     currentPi = pi;
-                    if (pi.PropertyType == typeof(Guid) || pi.PropertyType == typeof(Guid?))
+
+                    if (IsPrimitiveType(pi.PropertyType))
                     {
-                        var propertyIsNullable = pi.PropertyType == typeof(Guid?);
-                        sb.AppendLine($"    {GetTypescriptTypeFromPrimitive(pi, propertyIsNullable)},");
+                        var propertyIsNullable = IsNullableType(pi.PropertyType);
+                        sb.AppendLine($"    {GetTypescriptPropertyLine(pi, propertyIsNullable)},");
                         continue;
                     }
 
-
-                    if (pi.PropertyType == typeof(string))
+                    if (pi.PropertyType.IsEnum)
                     {
-                        sb.AppendLine($"    {GetTypescriptTypeFromPrimitive(pi, false)},");
-                        continue;
-                    }
-
-                    if (pi.PropertyType == typeof(Int32) || pi.PropertyType == typeof(Int32?))
-                    {
-                        var propertyIsNullable = pi.PropertyType == typeof(Int32?);
-                        sb.AppendLine($"    {GetTypescriptTypeFromPrimitive(pi, propertyIsNullable)},");
-                        continue;
-                    }
-
-                    if (pi.PropertyType == typeof(bool) || pi.PropertyType == typeof(bool?))
-                    {
-                        var propertyIsNullable = pi.PropertyType == typeof(bool?);
-                        sb.AppendLine($"    {GetTypescriptTypeFromPrimitive(pi, propertyIsNullable)},");
-                        continue;
-                    }
-
-                    if ((pi.PropertyType.IsEnum))
-                    {
-                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {pi.Name},");
+                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {pi.PropertyType.Name},");
                         GenerateEnumModel(pi, x);
                         continue;
                     }
 
-                    if (pi.PropertyType == typeof(decimal) || pi.PropertyType == typeof(decimal?))
+                    if (IsCollectionType(pi.PropertyType))
                     {
-                        var propertyIsNullable = pi.PropertyType == typeof(decimal?);
-                        sb.AppendLine($"    {GetTypescriptTypeFromPrimitive(pi, propertyIsNullable)},");
-                        continue;
-                    }
-
-                    if (pi.PropertyType == typeof(long) || pi.PropertyType == typeof(long?))
-                    {
-                        var propertyIsNullable = pi.PropertyType == typeof(long?);
-                        sb.AppendLine($"    {GetTypescriptTypeFromPrimitive(pi, propertyIsNullable)},");
-                        continue;
-                    }
-
-                    if (pi.PropertyType == typeof(DateTime) || pi.PropertyType == typeof(DateTime?))
-                    {
-                        var propertyIsNullable = pi.PropertyType == typeof(DateTime?);
-                        sb.AppendLine($"    {GetTypescriptTypeFromPrimitive(pi, propertyIsNullable)},");
-                        continue;
-                    }
-
-                    if (pi.PropertyType.IsCollectionType() || pi.PropertyType.GetInterfaces().Contains(typeof(IEnumerable)))
-                    {
-                        var removeViewModelDecorator = RemoveViewModelDecorator(pi.PropertyType.GetGenericArguments().First().Name);
-                        if (pi.PropertyType.GetInterfaces().Contains(typeof(IEnumerable)))
+                        var genericType = GetGenericType(pi.PropertyType);
+                        if (IsPrimitiveType(genericType))
                         {
-                            var propertyBaseType = instance.GetType().GetProperty(pi.Name).PropertyType.GetGenericArguments().First();
-                            if (propertyBaseType.IsPrimitive || propertyBaseType == typeof(string))
-                            {
-                                //sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {pi.PropertyType.GetGenericArguments().First().Name.Replace("ViewModel", "")}[],");
-                                sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {removeViewModelDecorator.ToLowerFirstChar()}[],");
-                                continue;
-                            }
+                            var typescriptType = GetTypescriptTypeFromType(genericType);
+                            sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {typescriptType}[],");
                         }
-                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{removeViewModelDecorator.ToUpperFirstChar()}[],");
-                        childViewModels.Add(pi.PropertyType.GetGenericArguments().First());
+                        else
+                        {
+                            var childInterfaceName = RemoveViewModelDecorator(genericType.Name);
+                            sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName}[],");
+                            childViewModels.Add(genericType);
+                        }
                         continue;
                     }
 
                     if (pi.PropertyType.IsClass)
                     {
-                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{RemoveViewModelDecorator(pi.PropertyType.Name)},");
+                        var childInterfaceName = RemoveViewModelDecorator(pi.PropertyType.Name);
+                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName},");
                         childViewModels.Add(pi.PropertyType);
                         continue;
                     }
 
-
                     sb.AppendLine($"    {pi.Name.ToLowerFirstChar()} : *****,");
                 }
 
-                var trimEnd = RemoveLastSpecialSign(sb);
-
-                var typescriptModel = new TypescriptModel(trimEnd + "\r\n}\r\n", viewModelName);
+                var trimmedModel = RemoveLastSpecialSign(sb);
+                var typescriptModel = new TypescriptModel(trimmedModel + "\r\n}\r\n", viewModelName);
                 x.AddNewObject(typescriptModel);
+
                 var sbImports = new StringBuilder();
                 foreach (var childViewModel in childViewModels)
                 {
                     Generate(childViewModel.Name, x, true);
-                    var import =
-                        $"import {{ I{childViewModel.Name} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childViewModel.Name)}';";
-                    if (sbImports.ToString().Contains(import) == false)
+                    var importLine = $"import {{ I{childViewModel.Name} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childViewModel.Name)}';";
+                    if (!sbImports.ToString().Contains(importLine))
                     {
-                        sbImports.AppendLine(import);
+                        sbImports.AppendLine(importLine);
                     }
                 }
                 typescriptModel.SetModel(sbImports + typescriptModel.Model);
@@ -170,55 +127,98 @@ namespace ITBees.ApiToTypescriptGenerator
 
         private string RemoveViewModelDecorator(string viewModelName)
         {
-            return viewModelName.Replace("ViewModel", "").Replace("UpdateModel", "").Replace("InputModel", "").Replace("Dto", "");
+            return viewModelName
+                .Replace("ViewModel", "")
+                .Replace("UpdateModel", "")
+                .Replace("InputModel", "")
+                .Replace("Dto", "");
         }
 
-        private string GetTypescriptTypeFromPrimitive(PropertyInfo piPropertyType, bool nullable)
+        private bool IsNullableType(Type type)
         {
-            var nullableSign = nullable ? "?" : "";
-            var typescriptDefinition = $"{piPropertyType.Name.ToLowerFirstChar()}{nullableSign}";
-            switch (piPropertyType.PropertyType)
-            {
-                case var type when type == typeof(String):
-                    return $"{typescriptDefinition}: string";
-                case var type when type == typeof(string):
-                    return $"{typescriptDefinition}: string";
-                case var type when type == typeof(int) || type == typeof(int?):
-                    return $"{typescriptDefinition}: number";
-                case var type when type == typeof(Int32) || type == typeof(Int32?):
-                    return $"{typescriptDefinition}: number";
-                case var type when type == typeof(decimal) || type == typeof(decimal?):
-                    return $"{typescriptDefinition}: number";
-                case var type when type == typeof(long) || type == typeof(long?):
-                    return $"{typescriptDefinition}: number";
-                case var type when type == typeof(Boolean) || type == typeof(Boolean?):
-                    return $"{typescriptDefinition}: boolean";
-                case var type when type == typeof(Guid) || type == typeof(Guid?):
-                    return $"{typescriptDefinition}: string";
-                case var type when type == typeof(DateTime) || type == typeof(DateTime?):
-                    return $"{typescriptDefinition}: Date";
+            return Nullable.GetUnderlyingType(type) != null;
+        }
 
-                default:
-                    return $"{piPropertyType.Name.ToLowerFirstChar()}: ***undefined***";
+        private bool IsPrimitiveType(Type type)
+        {
+            var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+            return underlyingType.IsPrimitive
+                || underlyingType == typeof(string)
+                || underlyingType == typeof(Guid)
+                || underlyingType == typeof(DateTime)
+                || underlyingType == typeof(decimal);
+        }
+
+        private bool IsCollectionType(Type type)
+        {
+            return typeof(IEnumerable).IsAssignableFrom(type) && type != typeof(string);
+        }
+
+        private Type GetGenericType(Type type)
+        {
+            if (type.IsArray)
+            {
+                return type.GetElementType();
+            }
+            if (type.IsGenericType)
+            {
+                return type.GetGenericArguments().First();
+            }
+            return null;
+        }
+
+        private string GetTypescriptPropertyLine(PropertyInfo pi, bool nullable)
+        {
+            var typescriptType = GetTypescriptTypeFromType(pi.PropertyType);
+            var nullableSign = nullable ? "?" : "";
+            return $"{pi.Name.ToLowerFirstChar()}{nullableSign}: {typescriptType}";
+        }
+
+        private string GetTypescriptTypeFromType(Type type)
+        {
+            var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+            if (underlyingType == typeof(string))
+            {
+                return "string";
+            }
+            else if (underlyingType == typeof(int) || underlyingType == typeof(long) || underlyingType == typeof(short) || underlyingType == typeof(decimal) || underlyingType == typeof(float) || underlyingType == typeof(double))
+            {
+                return "number";
+            }
+            else if (underlyingType == typeof(bool))
+            {
+                return "boolean";
+            }
+            else if (underlyingType == typeof(Guid))
+            {
+                return "string";
+            }
+            else if (underlyingType == typeof(DateTime))
+            {
+                return "Date";
+            }
+            else
+            {
+                return "***undefined***";
             }
         }
 
         private static string RemoveLastSpecialSign(StringBuilder sb)
         {
-            return sb.ToString().TrimEnd((char)10).TrimEnd((char)13).TrimEnd((char)44);
+            return sb.ToString().TrimEnd('\n').TrimEnd('\r').TrimEnd(',');
         }
 
-        private void GenerateEnumModel(PropertyInfo pi, TypeScriptGeneratedModels typescirptTypeScriptGeneratedModels)
+        private void GenerateEnumModel(PropertyInfo pi, TypeScriptGeneratedModels typescriptModels)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("export enum " + pi.Name + " " + (char)123);
-            foreach (var memberInfo in pi.PropertyType.GetMembers(BindingFlags.Public | BindingFlags.Static))
+            sb.AppendLine($"export enum {pi.PropertyType.Name} {{");
+            var enumValues = Enum.GetNames(pi.PropertyType);
+            foreach (var value in enumValues)
             {
-                sb.AppendLine("\t" + memberInfo.GetMemberValue(pi) + ",");
+                sb.AppendLine($"    {value},");
             }
-
-            var model = RemoveLastSpecialSign(sb) + "\r\n}\r\n";
-            typescirptTypeScriptGeneratedModels.AddNewObject(new TypescriptModel(model, pi.Name));
+            sb.AppendLine("}\r\n");
+            typescriptModels.AddNewObject(new TypescriptModel(sb.ToString(), pi.PropertyType.Name));
         }
     }
 }
