@@ -54,9 +54,6 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
                         {
                             var producedType = producesAttribute.Type;
 
-                            TypeScriptGeneratedModels typeScriptGeneratedModels = null;
-                            TypeScriptFile typeScriptGeneratedModel = null;
-
                             if (producedType.IsGenericType)
                             {
                                 var genericTypeDefinition = producedType.GetGenericTypeDefinition();
@@ -65,13 +62,20 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
 
                                 if (CheckOutputTypeIsHandledByGeneratr(genericTypeDefinition, sb))
                                 {
-                                    // Generate the TypeScript model with generic type arguments
-                                    typeScriptGeneratedModels = typeScriptGenerator.Generate(genericTypeDefinition.Name, new TypeScriptGeneratedModels(), false, genericTypeArguments);
+                                    var typeScriptGeneratedModels = typeScriptGenerator.Generate(genericTypeDefinition.Name, new TypeScriptGeneratedModels(), false, genericTypeArguments);
 
-                                    var interfaceName = GetInterfaceName(genericTypeDefinition, genericTypeArguments);
-                                    typeScriptGeneratedModel = new TypeScriptFile(
-                                        typeScriptGeneratedModels.ToString(),
-                                        interfaceName);
+                                    // Process each generated TypescriptModel
+                                    foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
+                                    {
+                                        var typeScriptGeneratedModel = new TypeScriptFile(
+                                            typescriptModel.Model,
+                                            typescriptModel.TypeName);
+
+                                        if (!generatedTypescriptModels.ContainsKey(typeScriptGeneratedModel.TypeName))
+                                        {
+                                            generatedTypescriptModels.Add(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
+                                        }
+                                    }
                                 }
                             }
                             else
@@ -79,23 +83,18 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
                                 sb.AppendLine($"\tProduces Type: {producedType.Name}");
                                 if (CheckOutputTypeIsHandledByGeneratr(producedType, sb))
                                 {
-                                    typeScriptGeneratedModels = typeScriptGenerator.Generate(producedType.Name, new TypeScriptGeneratedModels(), true);
+                                    var typeScriptGeneratedModels = typeScriptGenerator.Generate(producedType.Name, new TypeScriptGeneratedModels(), true);
 
-                                    typeScriptGeneratedModel = new TypeScriptFile(
-                                        typeScriptGeneratedModels.ToString(),
-                                        producedType.Name);
-                                }
-                            }
-
-                            if (typeScriptGeneratedModel != null)
-                            {
-                                generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
-                                sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
-                                foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
-                                {
-                                    if (!generatedTypescriptModels.ContainsKey(typescriptModel.ClassType))
+                                    foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
                                     {
-                                        generatedTypescriptModels.TryAdd(typescriptModel.ClassType, new TypeScriptFile(typescriptModel.Model, typescriptModel.ClassType));
+                                        var typeScriptGeneratedModel = new TypeScriptFile(
+                                            typescriptModel.Model,
+                                            typescriptModel.TypeName);
+
+                                        if (!generatedTypescriptModels.ContainsKey(typeScriptGeneratedModel.TypeName))
+                                        {
+                                            generatedTypescriptModels.Add(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
+                                        }
                                     }
                                 }
                             }
@@ -163,9 +162,9 @@ public class TypescriptGeneratorService : ITypescriptGeneratorService
                     }
                 }
 
-                foreach (var generatedTypescriptModel in generatedTypescriptModels)
+                foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
                 {
-                    AddEntryToZipArchive(zipArchive, generatedTypescriptModel.Value.FileName, generatedTypescriptModel.Value.FileContent);
+                    AddEntryToZipArchive(zipArchive, generatedTypescriptModel.FileName, generatedTypescriptModel.FileContent);
                 }
             }
 

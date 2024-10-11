@@ -22,12 +22,11 @@ namespace ITBees.ApiToTypescriptGenerator
                 }
                 var sb = new StringBuilder();
                 Type type = null;
-                Assembly[] asmblies = AppDomain.CurrentDomain.GetAssemblies();
-                foreach (Assembly assembly in asmblies)
+                Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+                foreach (Assembly assembly in assemblies)
                 {
                     if (viewModelName.Contains("`"))
                     {
-                        // Handle generic types
                         type = assembly.GetTypes().FirstOrDefault(t => t.Name == viewModelName);
                     }
                     else if (viewModelName.Contains("."))
@@ -57,32 +56,29 @@ namespace ITBees.ApiToTypescriptGenerator
 
                 // Handle generic types
                 string interfaceName = RemoveViewModelDecorator(type.Name);
-                if (type.IsGenericType)
+                if (type.IsGenericTypeDefinition)
                 {
                     if (genericTypeArguments != null)
                     {
                         // Create a closed generic type with the provided generic type arguments
                         type = type.MakeGenericType(genericTypeArguments);
                         interfaceName = RemoveViewModelDecorator(type.Name);
-                        // Remove ` symbol and generic arity
                         if (interfaceName.Contains('`'))
                         {
                             interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
                         }
-                        // Append the type arguments to the interface name to make it unique
                         var typeArgumentNames = genericTypeArguments.Select(t => RemoveViewModelDecorator(t.Name));
                         interfaceName += string.Join("", typeArgumentNames);
                     }
                     else
                     {
-                        // Cannot proceed without generic type arguments
                         throw new Exception($"Generic type arguments required for type {viewModelName}.");
                     }
                 }
 
                 sb.AppendLine($"export interface I{interfaceName} {{");
 
-                var childViewModels = new List<Type>();
+                var childViewModels = new HashSet<string>();
 
                 var properties = type.GetProperties();
 
@@ -123,20 +119,14 @@ namespace ITBees.ApiToTypescriptGenerator
                         }
                         else
                         {
-                            var childInterfaceName = RemoveViewModelDecorator(itemType.Name);
+                            var childInterfaceName = GetInterfaceName(itemType);
 
-                            // If itemType is generic parameter, use its name directly
-                            if (itemType.IsGenericParameter)
-                            {
-                                childInterfaceName = itemType.Name;
-                            }
-                            else
-                            {
-                                // Generate the model for itemType
-                                Generate(itemType.Name, x, true);
-                            }
+                            
+                            Generate(itemType.Name, x, true, itemType.IsGenericType ? itemType.GetGenericArguments() : null);
 
                             sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName}[];");
+
+                            childViewModels.Add(childInterfaceName);
                         }
                         continue;
                     }
@@ -144,20 +134,14 @@ namespace ITBees.ApiToTypescriptGenerator
                     // Handle complex types
                     if (propertyType.IsClass)
                     {
-                        var childInterfaceName = RemoveViewModelDecorator(propertyType.Name);
+                        var childInterfaceName = GetInterfaceName(propertyType);
 
-                        // If propertyType is generic parameter, use its name directly
-                        if (propertyType.IsGenericParameter)
-                        {
-                            childInterfaceName = propertyType.Name;
-                        }
-                        else
-                        {
-                            // Generate the model for propertyType
-                            Generate(propertyType.Name, x, true);
-                        }
+
+                        Generate(propertyType.Name, x, true, propertyType.IsGenericType ? propertyType.GetGenericArguments() : null);
 
                         sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName};");
+
+                        childViewModels.Add(childInterfaceName);
                         continue;
                     }
 
@@ -169,11 +153,11 @@ namespace ITBees.ApiToTypescriptGenerator
                 x.AddNewObject(typescriptModel);
 
                 var sbImports = new StringBuilder();
-                // Handle imports for child models
-                foreach (var childViewModel in x.GeneratedModels.Select(m => m.TypeName).Distinct())
+                
+                foreach (var childInterfaceName in childViewModels)
                 {
-                    var importLine = $"import {{ I{childViewModel} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childViewModel)}';";
-                    if (!sbImports.ToString().Contains(importLine) && childViewModel != interfaceName)
+                    var importLine = $"import {{ I{childInterfaceName} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childInterfaceName)}';";
+                    if (!sbImports.ToString().Contains(importLine) && childInterfaceName != interfaceName)
                     {
                         sbImports.AppendLine(importLine);
                     }
@@ -187,6 +171,24 @@ namespace ITBees.ApiToTypescriptGenerator
             }
             return x;
         }
+
+        private string GetInterfaceName(Type type)
+        {
+            var interfaceName = RemoveViewModelDecorator(type.Name);
+
+            if (type.IsGenericType)
+            {
+                if (interfaceName.Contains('`'))
+                {
+                    interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
+                }
+                var typeArgumentNames = type.GetGenericArguments().Select(t => RemoveViewModelDecorator(t.Name));
+                interfaceName += string.Join("", typeArgumentNames);
+            }
+
+            return interfaceName;
+        }
+
 
         private string RemoveViewModelDecorator(string viewModelName)
         {
