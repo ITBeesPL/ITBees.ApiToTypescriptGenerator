@@ -7,41 +7,25 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 {
     public class TypeScriptServiceGenerator
     {
-        // This method accepts the list of generated model types to consider
-        public Dictionary<string, string> GenerateServices(List<Type> generatedModelTypes)
+        public Dictionary<string, string> GenerateServices(List<ControllerInfo> controllers)
         {
             var services = new Dictionary<string, string>();
 
-            // Filter types to include only the generated models
-            var relevantTypes = generatedModelTypes
-                .Where(t => t.Name.EndsWith("Vm") || t.Name.EndsWith("Im") || t.Name.EndsWith("Um") || t.Name.EndsWith("Dm"))
-                .ToList();
-
-            // Group types by base name
-            var groupedTypes = relevantTypes
-                .GroupBy(t => GetBaseName(t.Name));
-
-            foreach (var group in groupedTypes)
+            foreach (var controller in controllers)
             {
-                var entityName = group.Key;
-                var entityTypes = group.ToList();
-                var serviceCode = GenerateService(entityName, entityTypes);
-                services.Add(entityName, serviceCode);
+                var serviceCode = GenerateService(controller);
+                services.Add(controller.ControllerName, serviceCode);
             }
 
             return services;
         }
 
-        private string GenerateService(string entityName, List<Type> types)
+        private string GenerateService(ControllerInfo controller)
         {
-            // Determine which methods to include
-            bool hasVm = types.Any(t => t.Name == entityName + "Vm");
-            bool hasIm = types.Any(t => t.Name == entityName + "Im");
-            bool hasUm = types.Any(t => t.Name == entityName + "Um");
-            bool hasDm = types.Any(t => t.Name == entityName + "Dm");
-
-            // Begin generating the TypeScript code
             var sb = new StringBuilder();
+
+            var entityName = controller.ControllerName.Replace("Controller", "Service");
+            var endpointName = controller.EndpointName;
 
             // Write import statements
             sb.AppendLine("import { Injectable } from '@angular/core';");
@@ -49,66 +33,90 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             sb.AppendLine("import { Observable } from 'rxjs';");
             sb.AppendLine("import { environment } from '../environments/environment';");
 
-            // Import the models
-            if (hasVm)
-                sb.AppendLine($"import {{ I{entityName}Vm }} from '../models/{ToKebabCase(entityName)}-vm.model';");
-            if (hasIm)
-                sb.AppendLine($"import {{ I{entityName}Im }} from '../models/{ToKebabCase(entityName)}-im.model';");
-            if (hasUm)
-                sb.AppendLine($"import {{ I{entityName}Um }} from '../models/{ToKebabCase(entityName)}-um.model';");
-            if (hasDm)
-                sb.AppendLine($"import {{ I{entityName}Dm }} from '../models/{ToKebabCase(entityName)}-dm.model';");
+            // Import the models used in actions
+            var modelImports = new HashSet<string>();
+
+            foreach (var action in controller.Actions)
+            {
+                if (action.ReturnType != null)
+                {
+                    var modelName = GetInterfaceName(action.ReturnType);
+                    modelImports.Add(modelName);
+                }
+                if (action.ParameterType != null)
+                {
+                    var modelName = GetInterfaceName(action.ParameterType);
+                    modelImports.Add(modelName);
+                }
+            }
+
+            foreach (var modelName in modelImports)
+            {
+                sb.AppendLine($"import {{ I{modelName} }} from '../models/{ToKebabCase(modelName)}.model';");
+            }
 
             // Begin the service class
             sb.AppendLine("");
             sb.AppendLine("@Injectable({");
             sb.AppendLine("  providedIn: 'root'");
             sb.AppendLine("})");
-            sb.AppendLine($"export class {entityName}Service {{");
-            sb.AppendLine($"  private baseUrl = environment.webApiUrl + '/{ToKebabCase(entityName)}';");
+            sb.AppendLine($"export class {entityName} {{");
+            sb.AppendLine($"  private baseUrl = environment.webApiUrl + '/{endpointName}';");
             sb.AppendLine("");
             sb.AppendLine("  constructor(private http: HttpClient) { }");
             sb.AppendLine("");
 
-            // Include methods
-            if (hasVm)
+            // Generate methods for actions
+            foreach (var action in controller.Actions)
             {
-                // Generate GET method
-                sb.AppendLine($"  get{entityName}(id: string): Observable<I{entityName}Vm> {{");
-                sb.AppendLine("    const headers = this.createHeaders();");
-                sb.AppendLine($"    return this.http.get<I{entityName}Vm>(`${{this.baseUrl}}/${{id}}`, {{ headers }});");
-                sb.AppendLine("  }");
-                sb.AppendLine("");
-            }
+                var methodName = action.ActionName.Substring(0, 1).ToLower() + action.ActionName.Substring(1);
 
-            if (hasIm)
-            {
-                // Generate POST method
-                sb.AppendLine($"  create{entityName}(model: I{entityName}Im): Observable<I{entityName}Vm> {{");
-                sb.AppendLine("    const headers = this.createHeaders();");
-                sb.AppendLine($"    return this.http.post<I{entityName}Vm>(this.baseUrl, model, {{ headers }});");
-                sb.AppendLine("  }");
-                sb.AppendLine("");
-            }
+                var returnType = action.ReturnType != null ? $"I{GetInterfaceName(action.ReturnType)}" : "void";
 
-            if (hasUm)
-            {
-                // Generate PUT method
-                sb.AppendLine($"  update{entityName}(id: string, model: I{entityName}Um): Observable<void> {{");
-                sb.AppendLine("    const headers = this.createHeaders();");
-                sb.AppendLine($"    return this.http.put<void>(`${{this.baseUrl}}/${{id}}`, model, {{ headers }});");
-                sb.AppendLine("  }");
-                sb.AppendLine("");
-            }
+                var parameterDeclaration = "";
+                var parameterUsage = "";
+                if (action.ParameterType != null)
+                {
+                    var parameterTypeName = $"I{GetInterfaceName(action.ParameterType)}";
+                    parameterDeclaration = $"model: {parameterTypeName}";
+                    parameterUsage = "model";
+                }
 
-            if (hasDm)
-            {
-                // Generate DELETE method
-                sb.AppendLine($"  delete{entityName}(id: string): Observable<void> {{");
-                sb.AppendLine("    const headers = this.createHeaders();");
-                sb.AppendLine($"    return this.http.delete<void>(`${{this.baseUrl}}/${{id}}`, {{ headers }});");
-                sb.AppendLine("  }");
-                sb.AppendLine("");
+                // Generate method based on HTTP method
+                switch (action.HttpMethod.ToUpper())
+                {
+                    case "GET":
+                        sb.AppendLine($"  {methodName}(id: string): Observable<{returnType}> {{");
+                        sb.AppendLine("    const headers = this.createHeaders();");
+                        sb.AppendLine($"    return this.http.get<{returnType}>(`${{this.baseUrl}}/${{id}}`, {{ headers }});");
+                        sb.AppendLine("  }");
+                        sb.AppendLine("");
+                        break;
+                    case "POST":
+                        sb.AppendLine($"  {methodName}({parameterDeclaration}): Observable<{returnType}> {{");
+                        sb.AppendLine("    const headers = this.createHeaders();");
+                        sb.AppendLine($"    return this.http.post<{returnType}>(this.baseUrl, {parameterUsage}, {{ headers }});");
+                        sb.AppendLine("  }");
+                        sb.AppendLine("");
+                        break;
+                    case "PUT":
+                        sb.AppendLine($"  {methodName}(id: string, {parameterDeclaration}): Observable<{returnType}> {{");
+                        sb.AppendLine("    const headers = this.createHeaders();");
+                        sb.AppendLine($"    return this.http.put<{returnType}>(`${{this.baseUrl}}/${{id}}`, {parameterUsage}, {{ headers }});");
+                        sb.AppendLine("  }");
+                        sb.AppendLine("");
+                        break;
+                    case "DELETE":
+                        sb.AppendLine($"  {methodName}(id: string): Observable<{returnType}> {{");
+                        sb.AppendLine("    const headers = this.createHeaders();");
+                        sb.AppendLine($"    return this.http.delete<{returnType}>(`${{this.baseUrl}}/${{id}}`, {{ headers }});");
+                        sb.AppendLine("  }");
+                        sb.AppendLine("");
+                        break;
+                    default:
+                        // Handle other HTTP methods if needed
+                        break;
+                }
             }
 
             // Include method to create headers with JWT token
@@ -125,11 +133,15 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return sb.ToString();
         }
 
-        private string GetBaseName(string typeName)
+        private string GetInterfaceName(Type type)
         {
-            if (typeName.EndsWith("Vm") || typeName.EndsWith("Im") || typeName.EndsWith("Um") || typeName.EndsWith("Dm"))
+            var typeName = type.Name;
+            if (type.IsGenericType)
             {
-                return typeName.Substring(0, typeName.Length - 2);
+                var genericArguments = type.GetGenericArguments();
+                typeName = typeName.Substring(0, typeName.IndexOf('`'));
+                var typeArgumentNames = genericArguments.Select(t => t.Name);
+                typeName += string.Join("", typeArgumentNames);
             }
             return typeName;
         }
@@ -140,4 +152,5 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return System.Text.RegularExpressions.Regex.Replace(input, "(\\B[A-Z])", "-$1").ToLower();
         }
     }
+
 }
