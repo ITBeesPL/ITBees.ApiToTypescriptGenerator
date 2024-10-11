@@ -25,7 +25,12 @@ namespace ITBees.ApiToTypescriptGenerator
                 Assembly[] asmblies = AppDomain.CurrentDomain.GetAssemblies();
                 foreach (Assembly assembly in asmblies)
                 {
-                    if (viewModelName.Contains("."))
+                    if (viewModelName.Contains("`"))
+                    {
+                        // Handle generic types
+                        type = assembly.GetTypes().FirstOrDefault(t => t.Name == viewModelName);
+                    }
+                    else if (viewModelName.Contains("."))
                     {
                         type = assembly.GetTypes().FirstOrDefault(x => x.FullName == viewModelName);
                     }
@@ -50,51 +55,87 @@ namespace ITBees.ApiToTypescriptGenerator
                     throw new Exception($"Type {viewModelName} not found.");
                 }
 
-                var instance = Activator.CreateInstance(type);
-                var interfaceName = RemoveViewModelDecorator(viewModelName);
-                sb.AppendLine($"export interface I{interfaceName} {{");
+                // Handle generic types
+                string interfaceName = RemoveViewModelDecorator(type.Name);
+                string genericArguments = string.Empty;
+                if (type.IsGenericType)
+                {
+                    var genericArgs = type.GetGenericArguments();
+                    genericArguments = "<" + string.Join(", ", genericArgs.Select(a => "I" + RemoveViewModelDecorator(a.Name))) + ">";
+                    interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
+                }
+
+                sb.AppendLine($"export interface I{interfaceName}{genericArguments} {{");
 
                 var childViewModels = new List<Type>();
-                foreach (PropertyInfo pi in instance.GetType().GetProperties())
+
+                // We cannot create an instance of an open generic type
+                var properties = type.GetProperties();
+
+                foreach (PropertyInfo pi in properties)
                 {
                     currentPi = pi;
 
-                    if (IsPrimitiveType(pi.PropertyType))
+                    Type propertyType = pi.PropertyType;
+
+                    // Handle generic type parameters
+                    if (propertyType.IsGenericParameter)
                     {
-                        var propertyIsNullable = IsNullableType(pi.PropertyType);
-                        sb.AppendLine($"    {GetTypescriptPropertyLine(pi, propertyIsNullable)},");
+                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {propertyType.Name};");
                         continue;
                     }
 
-                    if (pi.PropertyType.IsEnum)
+                    // Handle nullable types
+                    bool isNullable = IsNullableType(propertyType);
+                    propertyType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
+                    // Handle primitive types
+                    if (IsPrimitiveType(propertyType))
                     {
-                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {pi.PropertyType.Name},");
+                        sb.AppendLine($"    {GetTypescriptPropertyLine(pi, isNullable)};");
+                        continue;
+                    }
+
+                    // Handle enum types
+                    if (propertyType.IsEnum)
+                    {
+                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {propertyType.Name};");
                         GenerateEnumModel(pi, x);
                         continue;
                     }
 
-                    if (IsCollectionType(pi.PropertyType))
+                    // Handle collections
+                    if (IsCollectionType(propertyType))
                     {
-                        var genericType = GetGenericType(pi.PropertyType);
-                        if (IsPrimitiveType(genericType))
+                        Type itemType = GetCollectionItemType(propertyType);
+
+                        // Handle generic type parameters in collections
+                        if (itemType.IsGenericParameter)
                         {
-                            var typescriptType = GetTypescriptTypeFromType(genericType);
-                            sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {typescriptType}[],");
+                            sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {itemType.Name}[];");
+                            continue;
+                        }
+
+                        if (IsPrimitiveType(itemType))
+                        {
+                            var tsType = GetTypescriptTypeFromType(itemType);
+                            sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {tsType}[];");
                         }
                         else
                         {
-                            var childInterfaceName = RemoveViewModelDecorator(genericType.Name);
-                            sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName}[],");
-                            childViewModels.Add(genericType);
+                            var childInterfaceName = RemoveViewModelDecorator(itemType.Name);
+                            sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName}[];");
+                            childViewModels.Add(itemType);
                         }
                         continue;
                     }
 
-                    if (pi.PropertyType.IsClass)
+                    // Handle complex types
+                    if (propertyType.IsClass)
                     {
-                        var childInterfaceName = RemoveViewModelDecorator(pi.PropertyType.Name);
-                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName},");
-                        childViewModels.Add(pi.PropertyType);
+                        var childInterfaceName = RemoveViewModelDecorator(propertyType.Name);
+                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName};");
+                        childViewModels.Add(propertyType);
                         continue;
                     }
 
@@ -102,25 +143,45 @@ namespace ITBees.ApiToTypescriptGenerator
                 }
 
                 var trimmedModel = RemoveLastSpecialSign(sb);
-                var typescriptModel = new TypescriptModel(trimmedModel + "\r\n}\r\n", viewModelName);
+                var typescriptModel = new TypescriptModel(trimmedModel + "\r\n}\r\n", interfaceName);
                 x.AddNewObject(typescriptModel);
 
                 var sbImports = new StringBuilder();
                 foreach (var childViewModel in childViewModels)
                 {
                     Generate(childViewModel.Name, x, true);
-                    var importLine = $"import {{ I{childViewModel.Name} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childViewModel.Name)}';";
+                    var importLine = $"import {{ I{RemoveViewModelDecorator(childViewModel.Name)} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childViewModel.Name)}';";
                     if (!sbImports.ToString().Contains(importLine))
                     {
                         sbImports.AppendLine(importLine);
                     }
                 }
+
+                // Handle generic arguments imports
+                if (type.IsGenericType)
+                {
+                    var genericArgs = type.GetGenericArguments();
+                    foreach (var arg in genericArgs)
+                    {
+                        if (arg.IsGenericParameter)
+                        {
+                            // Do nothing for generic parameters
+                            continue;
+                        }
+                        Generate(arg.Name, x, true);
+                        var importLine = $"import {{ I{RemoveViewModelDecorator(arg.Name)} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(arg.Name)}';";
+                        if (!sbImports.ToString().Contains(importLine))
+                        {
+                            sbImports.AppendLine(importLine);
+                        }
+                    }
+                }
+
                 typescriptModel.SetModel(sbImports + typescriptModel.Model);
             }
             catch (Exception e)
             {
-                x.AddNewObject(new TypescriptModel($"\t\t\t>>>>there was an problem while generating class {viewModelName} (property - {currentPi?.Name}),  check it manually, error :" + e.Message, viewModelName));
-
+                x.AddNewObject(new TypescriptModel($"\t\t\t>>>> There was a problem while generating class {viewModelName} (property - {currentPi?.Name}), check it manually, error: " + e.Message, viewModelName));
             }
             return x;
         }
@@ -131,7 +192,8 @@ namespace ITBees.ApiToTypescriptGenerator
                 .Replace("ViewModel", "")
                 .Replace("UpdateModel", "")
                 .Replace("InputModel", "")
-                .Replace("Dto", "");
+                .Replace("Dto", "")
+                .Split('`')[0]; // Remove generic arity
         }
 
         private bool IsNullableType(Type type)
@@ -154,7 +216,7 @@ namespace ITBees.ApiToTypescriptGenerator
             return typeof(IEnumerable).IsAssignableFrom(type) && type != typeof(string);
         }
 
-        private Type GetGenericType(Type type)
+        private Type GetCollectionItemType(Type type)
         {
             if (type.IsArray)
             {
@@ -164,7 +226,7 @@ namespace ITBees.ApiToTypescriptGenerator
             {
                 return type.GetGenericArguments().First();
             }
-            return null;
+            return typeof(object);
         }
 
         private string GetTypescriptPropertyLine(PropertyInfo pi, bool nullable)
@@ -205,7 +267,7 @@ namespace ITBees.ApiToTypescriptGenerator
 
         private static string RemoveLastSpecialSign(StringBuilder sb)
         {
-            return sb.ToString().TrimEnd('\n').TrimEnd('\r').TrimEnd(',');
+            return sb.ToString().TrimEnd('\n').TrimEnd('\r').TrimEnd(',').TrimEnd(';');
         }
 
         private void GenerateEnumModel(PropertyInfo pi, TypeScriptGeneratedModels typescriptModels)
