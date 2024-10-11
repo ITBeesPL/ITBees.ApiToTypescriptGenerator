@@ -1,13 +1,20 @@
-﻿namespace ITBees.ApiToTypescriptGenerator.Services.Models;
+﻿using System.Collections.Generic;
 
-public class AllTypescriptModels
+namespace ITBees.ApiToTypescriptGenerator.Services.Models
 {
-    public string AllModelsInOneString { get; }
-    public byte[] ZipArchive { get; }
-
-    public AllTypescriptModels(string allModelsInOneString, byte[] zipArchive)
+    public class AllTypescriptModels
     {
-        AllModelsInOneString = allModelsInOneString;
-        ZipArchive = zipArchive;
+        public string ModelsContent { get; set; }
+        public byte[] ZipArchive { get; set; }
+        public List<string> GeneratedModelNames { get; set; }
+        public Dictionary<string, string> Services { get; set; }
+
+        public AllTypescriptModels(string modelsContent, byte[] zipArchive, List<string> generatedModelNames, Dictionary<string, string> services)
+        {
+            ModelsContent = modelsContent;
+            ZipArchive = zipArchive;
+            GeneratedModelNames = generatedModelNames;
+            Services = services;
+        }
     }
 }

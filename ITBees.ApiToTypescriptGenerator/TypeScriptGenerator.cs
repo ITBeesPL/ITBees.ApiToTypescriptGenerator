@@ -27,6 +27,7 @@ namespace ITBees.ApiToTypescriptGenerator
                 {
                     if (viewModelName.Contains("`"))
                     {
+                        // Handle generic types
                         type = assembly.GetTypes().FirstOrDefault(t => t.Name == viewModelName);
                     }
                     else if (viewModelName.Contains("."))
@@ -43,7 +44,7 @@ namespace ITBees.ApiToTypescriptGenerator
 
                     if (type.IsAbstract)
                     {
-                        type = BaseClassHelper.GetAllDerivedClassesFromBaseClass(type).First();
+                        // Handle abstract types if necessary
                     }
 
                     break;
@@ -60,7 +61,7 @@ namespace ITBees.ApiToTypescriptGenerator
                 {
                     if (genericTypeArguments != null)
                     {
-                        // Create a closed generic type with the provided generic type arguments
+                        // Create a closed generic type
                         type = type.MakeGenericType(genericTypeArguments);
                         interfaceName = RemoveViewModelDecorator(type.Name);
                         if (interfaceName.Contains('`'))
@@ -78,7 +79,7 @@ namespace ITBees.ApiToTypescriptGenerator
 
                 sb.AppendLine($"export interface I{interfaceName} {{");
 
-                var childViewModels = new HashSet<string>();
+                var childViewModels = new HashSet<string>(); // Stores interface names to import
 
                 var properties = type.GetProperties();
 
@@ -99,7 +100,7 @@ namespace ITBees.ApiToTypescriptGenerator
                         continue;
                     }
 
-                    // Handle enum types
+                    // Handle enums
                     if (propertyType.IsEnum)
                     {
                         sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {propertyType.Name};");
@@ -121,39 +122,40 @@ namespace ITBees.ApiToTypescriptGenerator
                         {
                             var childInterfaceName = GetInterfaceName(itemType);
 
-                            
+                            // Generate model for collection item type
                             Generate(itemType.Name, x, true, itemType.IsGenericType ? itemType.GetGenericArguments() : null);
 
                             sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName}[];");
 
-                            childViewModels.Add(childInterfaceName);
+                            childViewModels.Add(childInterfaceName); // Add to imports
                         }
                         continue;
                     }
 
                     // Handle complex types
-                    if (propertyType.IsClass)
+                    if (propertyType.IsClass && propertyType != typeof(string))
                     {
                         var childInterfaceName = GetInterfaceName(propertyType);
 
-
+                        // Generate model for property type
                         Generate(propertyType.Name, x, true, propertyType.IsGenericType ? propertyType.GetGenericArguments() : null);
 
                         sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName};");
 
-                        childViewModels.Add(childInterfaceName);
+                        childViewModels.Add(childInterfaceName); // Add to imports
                         continue;
                     }
 
-                    sb.AppendLine($"    {pi.Name.ToLowerFirstChar()} : *****,");
+                    sb.AppendLine($"    {pi.Name.ToLowerFirstChar()} : any;");
                 }
 
-                var trimmedModel = RemoveLastSpecialSign(sb);
-                var typescriptModel = new TypescriptModel(trimmedModel + "\r\n}\r\n", interfaceName);
+                sb.AppendLine("}");
+
+                var typescriptModel = new TypescriptModel(sb.ToString(), interfaceName, type);
                 x.AddNewObject(typescriptModel);
 
                 var sbImports = new StringBuilder();
-                
+                // Generate imports for dependent interfaces
                 foreach (var childInterfaceName in childViewModels)
                 {
                     var importLine = $"import {{ I{childInterfaceName} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childInterfaceName)}';";
@@ -167,7 +169,7 @@ namespace ITBees.ApiToTypescriptGenerator
             }
             catch (Exception e)
             {
-                x.AddNewObject(new TypescriptModel($"\t\t\t>>>> There was a problem while generating class {viewModelName} (property - {currentPi?.Name}), check it manually, error: " + e.Message, viewModelName));
+                x.AddNewObject(new TypescriptModel($"\t\t\t>>>> An error occurred while generating class {viewModelName} (property - {currentPi?.Name}), check manually, error: " + e.Message, viewModelName, null));
             }
             return x;
         }
@@ -188,7 +190,6 @@ namespace ITBees.ApiToTypescriptGenerator
 
             return interfaceName;
         }
-
 
         private string RemoveViewModelDecorator(string viewModelName)
         {
@@ -289,7 +290,8 @@ namespace ITBees.ApiToTypescriptGenerator
                 sb.AppendLine($"    {value},");
             }
             sb.AppendLine("}\r\n");
-            typescriptModels.AddNewObject(new TypescriptModel(sb.ToString(), pi.PropertyType.Name));
+            // Provide the required 'originalType' parameter
+            typescriptModels.AddNewObject(new TypescriptModel(sb.ToString(), pi.PropertyType.Name, pi.PropertyType));
         }
     }
 }

@@ -1,4 +1,8 @@
-﻿using System.IO.Compression;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using ITBees.ApiToTypescriptGenerator.Interfaces;
@@ -10,222 +14,265 @@ using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace ITBees.ApiToTypescriptGenerator.Services;
-
-public class TypescriptGeneratorService : ITypescriptGeneratorService
+namespace ITBees.ApiToTypescriptGenerator.Services
 {
-    private readonly IServiceProvider _serviceProvider;
-
-    public TypescriptGeneratorService(IServiceProvider serviceProvider)
+    public class TypescriptGeneratorService : ITypescriptGeneratorService
     {
-        _serviceProvider = serviceProvider;
-    }
-    /// <summary>
-    /// Returns all registeres controllers with their input parameters, methods, and returning types as typescript interfaces returned as long string
-    /// </summary>
-    /// <returns></returns>
-    public AllTypescriptModels GetAllControllersWithTypescriptModels()
-    {
-        var partManager = _serviceProvider.GetRequiredService<ApplicationPartManager>();
-        var feature = new ControllerFeature();
-        partManager.PopulateFeature(feature);
-        var actionDescriptorCollectionProvider = _serviceProvider.GetRequiredService<IActionDescriptorCollectionProvider>();
-        var sb = new StringBuilder();
-        var typeScriptGenerator = new TypeScriptGenerator();
-        var generatedTypescriptModels = new Dictionary<string, TypeScriptFile>();
-        byte[] zipBytes;
+        private readonly IServiceProvider _serviceProvider;
 
-        using (var zipMemoryStream = new MemoryStream())
+        public TypescriptGeneratorService(IServiceProvider serviceProvider)
         {
-            using (ZipArchive zipArchive = new ZipArchive(zipMemoryStream, ZipArchiveMode.Create, true))
+            _serviceProvider = serviceProvider;
+        }
+
+        /// <summary>
+        /// Returns all registered controllers with their input parameters, methods, and returning types as TypeScript interfaces.
+        /// </summary>
+        public AllTypescriptModels GetAllControllersWithTypescriptModels()
+        {
+            var partManager = _serviceProvider.GetRequiredService<ApplicationPartManager>();
+            var feature = new ControllerFeature();
+            partManager.PopulateFeature(feature);
+            var actionDescriptorCollectionProvider = _serviceProvider.GetRequiredService<IActionDescriptorCollectionProvider>();
+            var sb = new StringBuilder();
+            var typeScriptGenerator = new TypeScriptGenerator();
+            var generatedTypescriptModels = new Dictionary<string, TypeScriptFile>();
+            var generatedModelTypes = new HashSet<Type>(); // Collect the generated model types
+            byte[] zipBytes;
+            Dictionary<string, string> generatedServices = null;
+
+            using (var zipMemoryStream = new MemoryStream())
             {
-                foreach (var actionDescriptor in actionDescriptorCollectionProvider.ActionDescriptors.Items)
+                using (ZipArchive zipArchive = new ZipArchive(zipMemoryStream, ZipArchiveMode.Create, true))
                 {
-                    if (actionDescriptor is ControllerActionDescriptor controllerActionDescriptor)
+                    foreach (var actionDescriptor in actionDescriptorCollectionProvider.ActionDescriptors.Items)
                     {
-                        var typescriptFolder = controllerActionDescriptor.ControllerName;
-                        sb.AppendLine($"[Controller /{controllerActionDescriptor.ControllerName}]");
-                        sb.AppendLine($"Action: {controllerActionDescriptor.ActionName}");
-
-                        // Handle ProducesAttribute
-                        var producesAttribute = controllerActionDescriptor.MethodInfo.GetCustomAttribute<ProducesAttribute>();
-                        sb.AppendLine("\tProduces :");
-                        if (producesAttribute != null && producesAttribute.Type != null)
+                        if (actionDescriptor is ControllerActionDescriptor controllerActionDescriptor)
                         {
-                            var producedType = producesAttribute.Type;
+                            var typescriptFolder = controllerActionDescriptor.ControllerName;
+                            sb.AppendLine($"[Controller /{controllerActionDescriptor.ControllerName}]");
+                            sb.AppendLine($"Action: {controllerActionDescriptor.ActionName}");
 
-                            if (producedType.IsGenericType)
+                            // Handle ProducesAttribute
+                            var producesAttribute = controllerActionDescriptor.MethodInfo.GetCustomAttribute<ProducesAttribute>();
+                            sb.AppendLine("\tProduces :");
+                            if (producesAttribute != null && producesAttribute.Type != null)
                             {
-                                var genericTypeDefinition = producedType.GetGenericTypeDefinition();
-                                var genericTypeArguments = producedType.GetGenericArguments();
-                                sb.AppendLine($"\tProduces Type: {genericTypeDefinition.Name}<{string.Join(", ", genericTypeArguments.Select(t => t.Name))}>");
+                                var producedType = producesAttribute.Type;
 
-                                if (CheckOutputTypeIsHandledByGeneratr(genericTypeDefinition, sb))
+                                if (producedType.IsGenericType)
                                 {
-                                    var typeScriptGeneratedModels = typeScriptGenerator.Generate(genericTypeDefinition.Name, new TypeScriptGeneratedModels(), false, genericTypeArguments);
+                                    var genericTypeDefinition = producedType.GetGenericTypeDefinition();
+                                    var genericTypeArguments = producedType.GetGenericArguments();
+                                    sb.AppendLine($"\tProduces Type: {genericTypeDefinition.Name}<{string.Join(", ", genericTypeArguments.Select(t => t.Name))}>");
 
-                                    // Process each generated TypescriptModel
-                                    foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
+                                    if (CheckOutputTypeIsHandledByGenerator(genericTypeDefinition, sb))
                                     {
-                                        var typeScriptGeneratedModel = new TypeScriptFile(
-                                            typescriptModel.Model,
-                                            typescriptModel.TypeName);
+                                        var typeScriptGeneratedModels = typeScriptGenerator.Generate(genericTypeDefinition.Name, new TypeScriptGeneratedModels(), false, genericTypeArguments);
 
-                                        if (!generatedTypescriptModels.ContainsKey(typeScriptGeneratedModel.TypeName))
+                                        // Process each generated TypescriptModel
+                                        foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
                                         {
-                                            generatedTypescriptModels.Add(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
+                                            var typeScriptGeneratedModel = new TypeScriptFile(
+                                                typescriptModel.Model,
+                                                typescriptModel.TypeName);
+
+                                            if (!generatedTypescriptModels.ContainsKey(typeScriptGeneratedModel.TypeName))
+                                            {
+                                                generatedTypescriptModels.Add(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
+                                                generatedModelTypes.Add(typescriptModel.OriginalType);
+                                            }
                                         }
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                sb.AppendLine($"\tProduces Type: {producedType.Name}");
-                                if (CheckOutputTypeIsHandledByGeneratr(producedType, sb))
-                                {
-                                    var typeScriptGeneratedModels = typeScriptGenerator.Generate(producedType.Name, new TypeScriptGeneratedModels(), true);
-
-                                    foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
-                                    {
-                                        var typeScriptGeneratedModel = new TypeScriptFile(
-                                            typescriptModel.Model,
-                                            typescriptModel.TypeName);
-
-                                        if (!generatedTypescriptModels.ContainsKey(typeScriptGeneratedModel.TypeName))
-                                        {
-                                            generatedTypescriptModels.Add(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        sb.AppendLine($"[Controller /{controllerActionDescriptor.ControllerName} request type : {controllerActionDescriptor.ActionName}]");
-
-                        // Handle parameters
-                        foreach (var parameter in controllerActionDescriptor.Parameters)
-                        {
-                            sb.AppendLine($"\t\tParameter: {parameter.Name}, Type: {parameter.ParameterType}");
-
-                            // Handle FromBody parameters
-                            if (parameter.BindingInfo != null && parameter.BindingInfo.BindingSource == BindingSource.Body)
-                            {
-                                var parameterType = parameter.ParameterType;
-
-                                TypeScriptGeneratedModels typeScriptGeneratedModels = null;
-                                TypeScriptFile typeScriptGeneratedModel = null;
-
-                                if (parameterType.IsGenericType)
-                                {
-                                    var genericTypeDefinition = parameterType.GetGenericTypeDefinition();
-                                    var genericTypeArguments = parameterType.GetGenericArguments();
-                                    sb.AppendLine($"\tParameter Type: {genericTypeDefinition.Name}<{string.Join(", ", genericTypeArguments.Select(t => t.Name))}>");
-
-                                    if (CheckOutputTypeIsHandledByGeneratr(genericTypeDefinition, sb))
-                                    {
-                                        // Generate the TypeScript model with generic type arguments
-                                        typeScriptGeneratedModels = typeScriptGenerator.Generate(genericTypeDefinition.Name, new TypeScriptGeneratedModels(), false, genericTypeArguments);
-
-                                        var interfaceName = GetInterfaceName(genericTypeDefinition, genericTypeArguments);
-                                        typeScriptGeneratedModel = new TypeScriptFile(
-                                            typeScriptGeneratedModels.ToString(),
-                                            interfaceName);
                                     }
                                 }
                                 else
                                 {
-                                    sb.AppendLine($"\tParameter Type: {parameterType.Name}");
-                                    if (CheckOutputTypeIsHandledByGeneratr(parameterType, sb))
+                                    sb.AppendLine($"\tProduces Type: {producedType.Name}");
+                                    if (CheckOutputTypeIsHandledByGenerator(producedType, sb))
                                     {
-                                        typeScriptGeneratedModels = typeScriptGenerator.Generate(parameterType.Name, new TypeScriptGeneratedModels(), true);
+                                        var typeScriptGeneratedModels = typeScriptGenerator.Generate(producedType.Name, new TypeScriptGeneratedModels(), true);
 
-                                        typeScriptGeneratedModel = new TypeScriptFile(
-                                            typeScriptGeneratedModels.ToString(),
-                                            parameterType.Name);
+                                        foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
+                                        {
+                                            var typeScriptGeneratedModel = new TypeScriptFile(
+                                                typescriptModel.Model,
+                                                typescriptModel.TypeName);
+
+                                            if (!generatedTypescriptModels.ContainsKey(typeScriptGeneratedModel.TypeName))
+                                            {
+                                                generatedTypescriptModels.Add(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
+                                                generatedModelTypes.Add(typescriptModel.OriginalType);
+                                            }
+                                        }
                                     }
                                 }
+                            }
 
-                                if (typeScriptGeneratedModel != null)
+                            sb.AppendLine($"[Controller /{controllerActionDescriptor.ControllerName} request type : {controllerActionDescriptor.ActionName}]");
+
+                            // Handle parameters
+                            foreach (var parameter in controllerActionDescriptor.Parameters)
+                            {
+                                sb.AppendLine($"\t\tParameter: {parameter.Name}, Type: {parameter.ParameterType}");
+
+                                // Handle FromBody parameters
+                                if (parameter.BindingInfo != null && parameter.BindingInfo.BindingSource == BindingSource.Body)
                                 {
-                                    generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
-                                    sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
-                                    foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
+                                    var parameterType = parameter.ParameterType;
+
+                                    TypeScriptGeneratedModels typeScriptGeneratedModels = null;
+                                    TypeScriptFile typeScriptGeneratedModel = null;
+
+                                    if (parameterType.IsGenericType)
                                     {
-                                        if (!generatedTypescriptModels.ContainsKey(typescriptModel.ClassType))
+                                        var genericTypeDefinition = parameterType.GetGenericTypeDefinition();
+                                        var genericTypeArguments = parameterType.GetGenericArguments();
+                                        sb.AppendLine($"\tParameter Type: {genericTypeDefinition.Name}<{string.Join(", ", genericTypeArguments.Select(t => t.Name))}>");
+
+                                        if (CheckOutputTypeIsHandledByGenerator(genericTypeDefinition, sb))
                                         {
-                                            generatedTypescriptModels.TryAdd(typescriptModel.ClassType, new TypeScriptFile(typescriptModel.Model, typescriptModel.ClassType));
+                                            // Generate the TypeScript model with generic type arguments
+                                            typeScriptGeneratedModels = typeScriptGenerator.Generate(genericTypeDefinition.Name, new TypeScriptGeneratedModels(), false, genericTypeArguments);
+
+                                            var interfaceName = GetInterfaceName(genericTypeDefinition, genericTypeArguments);
+                                            // Retrieve the specific TypescriptModel
+                                            var typescriptModel = typeScriptGeneratedModels.GeneratedModels.FirstOrDefault(m => m.TypeName == interfaceName);
+                                            if (typescriptModel != null)
+                                            {
+                                                typeScriptGeneratedModel = new TypeScriptFile(
+                                                    typescriptModel.Model,
+                                                    interfaceName);
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        sb.AppendLine($"\tParameter Type: {parameterType.Name}");
+                                        if (CheckOutputTypeIsHandledByGenerator(parameterType, sb))
+                                        {
+                                            typeScriptGeneratedModels = typeScriptGenerator.Generate(parameterType.Name, new TypeScriptGeneratedModels(), true);
+
+                                            var interfaceName = parameterType.Name;
+                                            // Retrieve the specific TypescriptModel
+                                            var typescriptModel = typeScriptGeneratedModels.GeneratedModels.FirstOrDefault(m => m.TypeName == interfaceName);
+                                            if (typescriptModel != null)
+                                            {
+                                                typeScriptGeneratedModel = new TypeScriptFile(
+                                                    typescriptModel.Model,
+                                                    interfaceName);
+                                            }
+                                        }
+                                    }
+
+                                    if (typeScriptGeneratedModel != null)
+                                    {
+                                        generatedTypescriptModels.TryAdd(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
+                                        generatedModelTypes.Add(parameterType);
+                                        sb.AppendLine("***\r\n" + typeScriptGeneratedModel + "***\r\n");
+                                        foreach (var tsModel in typeScriptGeneratedModels.GeneratedModels)
+                                        {
+                                            if (!generatedTypescriptModels.ContainsKey(tsModel.TypeName))
+                                            {
+                                                generatedTypescriptModels.Add(tsModel.TypeName, new TypeScriptFile(tsModel.Model, tsModel.TypeName));
+                                                if (tsModel.OriginalType != null)
+                                                {
+                                                    generatedModelTypes.Add(tsModel.OriginalType);
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
+
+                    // Write models to zip archive
+                    foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
+                    {
+                        AddEntryToZipArchive(zipArchive, generatedTypescriptModel.FileName, generatedTypescriptModel.FileContent);
+                    }
+
+                    // Now generate the services
+                    var serviceGenerator = new TypeScriptServiceGenerator();
+                    generatedServices = serviceGenerator.GenerateServices(generatedModelTypes.ToList());
+
+                    // Write the generated services to the zip file
+                    foreach (var service in generatedServices)
+                    {
+                        var serviceFileName = $"api-services/{ToKebabCase(service.Key)}.service.ts";
+                        var zipEntry = zipArchive.CreateEntry(serviceFileName);
+                        using (var entryStream = zipEntry.Open())
+                        using (var streamWriter = new StreamWriter(entryStream))
+                        {
+                            streamWriter.Write(service.Value);
+                        }
+                    }
                 }
 
-                foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
-                {
-                    AddEntryToZipArchive(zipArchive, generatedTypescriptModel.FileName, generatedTypescriptModel.FileContent);
-                }
+                zipBytes = zipMemoryStream.ToArray();
             }
 
-            zipBytes = zipMemoryStream.ToArray();
+            return new AllTypescriptModels(sb.ToString(), zipBytes, generatedModelTypes.Select(t => t.Name).ToList(), generatedServices);
         }
 
-        return new AllTypescriptModels(sb.ToString(), zipBytes);
-    }
-
-    // Helper method to generate interface name based on generic type arguments
-    private string GetInterfaceName(Type genericTypeDefinition, Type[] genericTypeArguments)
-    {
-        var baseName = RemoveViewModelDecorator(genericTypeDefinition.Name);
-        if (baseName.Contains('`'))
+        // Helper methods
+        private string GetInterfaceName(Type genericTypeDefinition, Type[] genericTypeArguments)
         {
-            baseName = baseName.Substring(0, baseName.IndexOf('`'));
-        }
-        var typeArgumentNames = genericTypeArguments.Select(t => RemoveViewModelDecorator(t.Name));
-        var interfaceName = baseName + string.Join("", typeArgumentNames);
-        return interfaceName;
-    }
-
-    // Adjust the RemoveViewModelDecorator method if needed
-    private string RemoveViewModelDecorator(string viewModelName)
-    {
-        // Remove generic arity if present
-        if (viewModelName.Contains('`'))
-        {
-            viewModelName = viewModelName.Substring(0, viewModelName.IndexOf('`'));
+            var baseName = RemoveViewModelDecorator(genericTypeDefinition.Name);
+            if (baseName.Contains('`'))
+            {
+                baseName = baseName.Substring(0, baseName.IndexOf('`'));
+            }
+            var typeArgumentNames = genericTypeArguments.Select(t => RemoveViewModelDecorator(t.Name));
+            var interfaceName = baseName + string.Join("", typeArgumentNames);
+            return interfaceName;
         }
 
-        return viewModelName
-            .Replace("ViewModel", "")
-            .Replace("UpdateModel", "")
-            .Replace("InputModel", "")
-            .Replace("Dto", "");
-    }
-
-
-
-    private List<string> _exludedTypesFromGenerationInTypeScript = new List<string>()
-    {
-        "FileContentResult"
-    };
-    private bool CheckOutputTypeIsHandledByGeneratr(Type producesAttributeType, StringBuilder sb)
-    {
-        if (_exludedTypesFromGenerationInTypeScript.Contains(producesAttributeType.Name))
+        private string RemoveViewModelDecorator(string viewModelName)
         {
-            sb.AppendLine($"Not handled type in typescript generator {producesAttributeType.Name}");
-            return false;
+            // Remove generic arity if present
+            if (viewModelName.Contains('`'))
+            {
+                viewModelName = viewModelName.Substring(0, viewModelName.IndexOf('`'));
+            }
+
+            return viewModelName
+                .Replace("ViewModel", "")
+                .Replace("UpdateModel", "")
+                .Replace("InputModel", "")
+                .Replace("Dto", "");
         }
 
-        return true;
-    }
-
-    private void AddEntryToZipArchive(ZipArchive zipArchive, string fileName, string fileContent)
-    {
-        ZipArchiveEntry zipEntry = zipArchive.CreateEntry(fileName);
-        using (StreamWriter writer = new StreamWriter(zipEntry.Open()))
+        private string ToKebabCase(string input)
         {
-            writer.Write(fileContent);
+            // Convert PascalCase to kebab-case
+            return System.Text.RegularExpressions.Regex.Replace(input, "(\\B[A-Z])", "-$1").ToLower();
+        }
+
+        private void AddEntryToZipArchive(ZipArchive zipArchive, string fileName, string fileContent)
+        {
+            var zipEntry = zipArchive.CreateEntry(fileName);
+            using (var entryStream = zipEntry.Open())
+            using (var streamWriter = new StreamWriter(entryStream))
+            {
+                streamWriter.Write(fileContent);
+            }
+        }
+
+        private List<string> _excludedTypesFromGenerationInTypeScript = new List<string>()
+        {
+            "FileContentResult"
+        };
+
+        private bool CheckOutputTypeIsHandledByGenerator(Type type, StringBuilder sb)
+        {
+            if (_excludedTypesFromGenerationInTypeScript.Contains(type.Name))
+            {
+                sb.AppendLine($"Not handled type in TypeScript generator: {type.Name}");
+                return false;
+            }
+
+            return true;
         }
     }
 }

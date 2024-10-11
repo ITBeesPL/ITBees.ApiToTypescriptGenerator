@@ -3,26 +3,21 @@
     public class TypescriptModel
     {
         public string Model { get; private set; }
-        public string TypeName { get; set; }
-        public string ClassType { get; }
+        public string TypeName { get; private set; }
+        public string ClassType { get; private set; }
+        public Type OriginalType { get; private set; }
 
-        public TypescriptModel(string model, string classType)
+        public TypescriptModel(string model, string typeName, Type originalType)
         {
             Model = model;
-            ClassType = classType;
-            TypeName = classType;
+            TypeName = typeName;
+            ClassType = typeName;
+            OriginalType = originalType;
         }
 
-        public void SetModel(string newModel)
+        public void SetModel(string model)
         {
-            Model = newModel;
-        }
-        public override bool Equals(object obj)
-        {
-            var sameClassType = ((TypescriptModel)obj).ClassType == this.ClassType;
-            var sameModelBody = ((TypescriptModel)obj).Model == this.Model;
-            return sameClassType
-                   && sameModelBody;
+            Model = model;
         }
     }
 }
