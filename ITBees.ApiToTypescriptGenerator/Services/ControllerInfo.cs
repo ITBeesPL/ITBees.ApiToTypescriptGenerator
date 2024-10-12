@@ -1,8 +1,11 @@
-﻿namespace ITBees.ApiToTypescriptGenerator.Services;
+﻿using System.Collections.Generic;
 
-public class ControllerInfo
+namespace ITBees.ApiToTypescriptGenerator.Services
 {
-    public string ControllerName { get; set; }
-    public string EndpointName { get; set; }
-    public List<ActionInfo> Actions { get; set; } = new List<ActionInfo>();
+    public class ControllerInfo
+    {
+        public string ControllerName { get; set; }
+        public string EndpointName { get; set; }
+        public List<ActionInfo> Actions { get; set; } = new List<ActionInfo>();
+    }
 }

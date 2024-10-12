@@ -1,9 +1,14 @@
-﻿namespace ITBees.ApiToTypescriptGenerator.Services;
+﻿using System;
+using System.Collections.Generic;
+using System.Reflection;
 
-public class ActionInfo
+namespace ITBees.ApiToTypescriptGenerator.Services
 {
-    public string ActionName { get; set; }
-    public string HttpMethod { get; set; }
-    public Type ReturnType { get; set; }
-    public Type ParameterType { get; set; }
+    public class ActionInfo
+    {
+        public string ActionName { get; set; }
+        public string HttpMethod { get; set; }
+        public Type ReturnType { get; set; }
+        public List<ParameterInfo> Parameters { get; set; } = new List<ParameterInfo>();
+    }
 }
