@@ -1,4 +1,6 @@
-﻿namespace ITBees.ApiToTypescriptGenerator
+﻿using System;
+
+namespace ITBees.ApiToTypescriptGenerator
 {
     public class TypescriptModel
     {

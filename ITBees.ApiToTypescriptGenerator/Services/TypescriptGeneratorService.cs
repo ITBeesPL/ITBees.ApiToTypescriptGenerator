@@ -26,9 +26,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             _serviceProvider = serviceProvider;
         }
 
-        /// <summary>
-        /// Generates TypeScript models and services based on the registered controllers and actions.
-        /// </summary>
         public AllTypescriptModels GetAllControllersWithTypescriptModels()
         {
             var partManager = _serviceProvider.GetRequiredService<ApplicationPartManager>();
@@ -61,10 +58,8 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             sb.AppendLine($"[Controller /{controllerName}]");
                             sb.AppendLine($"Action: {actionName}");
 
-                            // Determine HTTP method
                             var httpMethod = GetHttpMethod(controllerActionDescriptor);
 
-                            // Collect parameters
                             var parameters = new List<ServiceParameter>();
                             foreach (var parameter in controllerActionDescriptor.Parameters)
                             {
@@ -83,7 +78,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                     FromRoute = fromRoute
                                 });
 
-                                // Generate TypeScript models for parameter types
                                 if (CheckTypeNeedsGeneration(parameterType))
                                 {
                                     var typeScriptGeneratedModels = typeScriptGenerator.Generate(parameterType.Name, new TypeScriptGeneratedModels(), true);
@@ -91,7 +85,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                 }
                             }
 
-                            // Get return type and generate models
                             var returnType = GetActionReturnType(methodInfo);
                             if (CheckTypeNeedsGeneration(returnType))
                             {
@@ -99,7 +92,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                 AddGeneratedModels(typeScriptGeneratedModels, generatedTypescriptModels, generatedModelTypes);
                             }
 
-                            // Add service method
                             var serviceMethod = new ServiceMethod
                             {
                                 ControllerName = controllerName,
@@ -112,17 +104,14 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                         }
                     }
 
-                    // Write models to zip archive
                     foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
                     {
                         AddEntryToZipArchive(zipArchive, generatedTypescriptModel.FileName, generatedTypescriptModel.FileContent);
                     }
 
-                    // Generate the services
                     var serviceGenerator = new TypeScriptServiceGenerator();
                     generatedServices = serviceGenerator.GenerateServices(serviceMethods);
 
-                    // Write the generated services to the zip file
                     foreach (var service in generatedServices)
                     {
                         var serviceFileName = $"api-services/{ToKebabCase(service.Key)}.service.ts";
@@ -136,10 +125,9 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return new AllTypescriptModels(sb.ToString(), zipBytes, generatedModelTypes.Select(t => t.Name).ToList(), generatedServices);
         }
 
-        // Helper method to get HTTP method
         private string GetHttpMethod(ControllerActionDescriptor actionDescriptor)
         {
-            var method = "GET"; // Default method
+            var method = "GET";
 
             var httpMethodAttributes = actionDescriptor.MethodInfo.GetCustomAttributes()
                 .OfType<HttpMethodAttribute>();
@@ -152,27 +140,31 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return method;
         }
 
-        // Helper method to get the actual return type
         private Type GetActionReturnType(MethodInfo methodInfo)
         {
             var returnType = methodInfo.ReturnType;
 
-            // Unwrap Task<> if it's an async method
             if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
             {
                 returnType = returnType.GetGenericArguments()[0];
             }
 
-            // Handle ActionResult<T>
             if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(ActionResult<>))
             {
                 returnType = returnType.GetGenericArguments()[0];
             }
 
+            var producesAttribute = methodInfo.GetCustomAttributes()
+                .FirstOrDefault(attr => attr.GetType().Name.StartsWith("Produces")) as dynamic;
+
+            if (producesAttribute != null && producesAttribute.Type != null)
+            {
+                returnType = producesAttribute.Type;
+            }
+
             return returnType;
         }
 
-        // Helper method to check if a type needs TypeScript model generation
         private bool CheckTypeNeedsGeneration(Type type)
         {
             if (type == null || type == typeof(void))
@@ -184,7 +176,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return true;
         }
 
-        // Helper method to determine if a type is a built-in type
         private bool IsBuiltInType(Type type)
         {
             var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
@@ -195,7 +186,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 || underlyingType == typeof(Guid);
         }
 
-        // Helper method to add generated models to the collections
         private void AddGeneratedModels(TypeScriptGeneratedModels typeScriptGeneratedModels, Dictionary<string, TypeScriptFile> generatedTypescriptModels, HashSet<Type> generatedModelTypes)
         {
             foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
@@ -215,7 +205,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             }
         }
 
-        // Helper method to add an entry to the ZIP archive
         private void AddEntryToZipArchive(ZipArchive zipArchive, string fileName, string fileContent)
         {
             var zipEntry = zipArchive.CreateEntry(fileName);
@@ -226,7 +215,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             }
         }
 
-        // Helper method to convert a string to kebab-case
         private string ToKebabCase(string input)
         {
             return System.Text.RegularExpressions.Regex.Replace(input, "(\\B[A-Z])", "-$1").ToLower();

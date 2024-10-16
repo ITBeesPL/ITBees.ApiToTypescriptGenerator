@@ -1,4 +1,4 @@
-﻿using System.Text;
+﻿using System.Collections.Generic;
 
 namespace ITBees.ApiToTypescriptGenerator
 {

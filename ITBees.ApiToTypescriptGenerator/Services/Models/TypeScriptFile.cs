@@ -12,14 +12,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services.Models
         {
             FileContent = fileContent;
             TypeName = typeName;
-            if (string.IsNullOrEmpty(fileName))
-            {
-                FileName = GetTypescriptFileName(typeName);
-            }
-            else
-            {
-                FileName = fileName;
-            }
+            FileName = string.IsNullOrEmpty(fileName) ? GetTypescriptFileName(typeName) : fileName;
         }
 
         public static string GetTypescriptFileName(string typeName)
@@ -34,7 +27,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services.Models
 
         public static string ConvertToTypescriptFileNameConvention(string typeName)
         {
-            return Regex.Replace(typeName, "([a-z](?=[A-Z])|[A-Z](?=[A-Z][a-z]))", "$1-").ToLower();
+            return Regex.Replace(typeName, "(\\B[A-Z])", "-$1").ToLower();
         }
     }
 }

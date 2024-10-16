@@ -12,7 +12,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         {
             var services = new Dictionary<string, string>();
 
-            // Grupowanie metod według kontrolera
             var groupedByController = serviceMethods.GroupBy(sm => sm.ControllerName);
 
             foreach (var controllerGroup in groupedByController)
@@ -32,13 +31,11 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         {
             var sb = new StringBuilder();
 
-            // Importy
             sb.AppendLine("import { Injectable } from '@angular/core';");
             sb.AppendLine("import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';");
             sb.AppendLine("import { Observable } from 'rxjs';");
-            sb.AppendLine("import { environment } from '../environments/environment';");
+            sb.AppendLine("import { environment } from '../../environments/environment';");
 
-            // Zbieranie modeli do importu
             var modelsToImport = new HashSet<string>();
 
             foreach (var method in methods)
@@ -59,13 +56,11 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 }
             }
 
-            // Import modeli
             foreach (var model in modelsToImport)
             {
-                sb.AppendLine($"import {{ {model} }} from '../models/{ToKebabCase(model)}.model';");
+                sb.AppendLine($"import {{ {model} }} from '../models/{ToKebabCase(model.Replace("I", ""))}.model';");
             }
 
-            // Definicja klasy serwisu
             sb.AppendLine("");
             sb.AppendLine("@Injectable({");
             sb.AppendLine("  providedIn: 'root'");
@@ -78,7 +73,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             sb.AppendLine("  constructor(private http: HttpClient) { }");
             sb.AppendLine("");
 
-            // Generowanie metod
             foreach (var method in methods)
             {
                 var methodName = method.ActionName.ToLowerFirstChar();
@@ -86,7 +80,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 var returnType = GetTypeScriptTypeName(method.ReturnType);
                 var returnTypeString = returnType != null ? $"Observable<{returnType}>" : "Observable<void>";
 
-                // Generowanie sygnatury metody
                 var parametersList = new List<string>();
                 foreach (var param in method.Parameters)
                 {
@@ -100,7 +93,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 
                 if (httpMethod == "GET" || httpMethod == "DELETE")
                 {
-                    // Parametry zapytania
                     sb.AppendLine("    let params = new HttpParams();");
 
                     foreach (var param in method.Parameters)
@@ -128,14 +120,13 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             sb.AppendLine($"    return this.http.delete<{returnType}>({url}, {{ headers, params }});");
                         }
                     }
-                    else // GET
+                    else
                     {
                         sb.AppendLine($"    return this.http.get<{returnType}>({url}, {{ headers, params }});");
                     }
                 }
                 else if (httpMethod == "POST" || httpMethod == "PUT")
                 {
-                    // Parametry w ciele żądania
                     var bodyParam = method.Parameters.FirstOrDefault(p => p.FromBody);
                     var url = "this.baseUrl";
 
@@ -154,7 +145,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 sb.AppendLine("");
             }
 
-            // Metoda tworząca nagłówki
             sb.AppendLine("  private createHeaders(): HttpHeaders {");
             sb.AppendLine("    let headers = new HttpHeaders();");
             sb.AppendLine("    const token = localStorage.getItem('token');");
@@ -178,7 +168,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 return GetTypeScriptPrimitiveType(type);
             }
 
-            // Zakładamy, że interfejsy TypeScript mają nazwy takie jak klasy C#, z prefiksem 'I'
             return $"I{type.Name}";
         }
 
@@ -202,7 +191,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 
         private string ToKebabCase(string input)
         {
-            // Konwertuje PascalCase na kebab-case
             return System.Text.RegularExpressions.Regex.Replace(input, "(\\B[A-Z])", "-$1").ToLower();
         }
     }
