@@ -70,13 +70,17 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                 var fromQuery = bindingSource == BindingSource.Query;
                                 var fromRoute = bindingSource == BindingSource.Path || bindingSource == BindingSource.ModelBinding;
 
+                                var controllerParameterDescriptor = parameter as ControllerParameterDescriptor;
+                                var parameterInfo = controllerParameterDescriptor?.ParameterInfo;
+
                                 parameters.Add(new ServiceParameter
                                 {
                                     Name = parameter.Name,
-                                    ParameterType = parameterType,
+                                    ParameterType = parameter.ParameterType,
                                     FromBody = fromBody,
                                     FromQuery = fromQuery,
-                                    FromRoute = fromRoute
+                                    FromRoute = fromRoute,
+                                    ParameterInfo = parameterInfo
                                 });
 
                                 // Generate models for parameter types, including generic arguments

@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using ITBees.ApiToTypescriptGenerator.Services.Models;
 
@@ -53,7 +54,8 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             foreach (var model in modelsToImport)
             {
                 var modelNameWithoutI = model.StartsWith("I") ? model.Substring(1) : model;
-                sb.AppendLine($"import {{ {model} }} from '../{ToKebabCase(modelNameWithoutI)}.model';");
+                var fileName = ToKebabCase(modelNameWithoutI);
+                sb.AppendLine($"import {{ {model} }} from '../{fileName}.model';");
             }
 
             sb.AppendLine("");
@@ -75,13 +77,27 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 var returnType = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
                 var returnTypeString = returnType != null ? $"Observable<{returnType}>" : "Observable<void>";
 
-                var parametersList = new List<string>();
+                var requiredParameters = new List<string>();
+                var optionalParameters = new List<string>();
+
                 foreach (var param in method.Parameters)
                 {
                     var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
-                    parametersList.Add($"{param.Name}: {paramType}");
+                    var isOptional = IsNullableType(param.ParameterInfo);
+                    var optionalSign = isOptional ? "?" : "";
+                    var parameterDeclaration = $"{param.Name}{optionalSign}: {paramType}";
+
+                    if (isOptional)
+                    {
+                        optionalParameters.Add(parameterDeclaration);
+                    }
+                    else
+                    {
+                        requiredParameters.Add(parameterDeclaration);
+                    }
                 }
-                var parametersString = string.Join(", ", parametersList);
+
+                var parametersString = string.Join(", ", requiredParameters.Concat(optionalParameters));
 
                 sb.AppendLine($"  {methodName}({parametersString}): {returnTypeString} {{");
                 sb.AppendLine("    const headers = this.createHeaders();");
@@ -94,31 +110,23 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                     {
                         if (!param.FromBody)
                         {
-                            sb.AppendLine($"    if ({param.Name} !== undefined && {param.Name} !== null) {{");
-                            sb.AppendLine($"      params = params.set('{param.Name}', {param.Name}.toString());");
+                            var paramName = param.Name;
+                            var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
+                            sb.AppendLine($"    if ({paramName} !== undefined && {paramName} !== null) {{");
+                            if (paramType == "string")
+                            {
+                                sb.AppendLine($"      params = params.set('{paramName}', {paramName});");
+                            }
+                            else
+                            {
+                                sb.AppendLine($"      params = params.set('{paramName}', {paramName}.toString());");
+                            }
                             sb.AppendLine("    }");
                         }
                     }
 
                     var url = "this.baseUrl";
-
-                    if (httpMethod == "DELETE")
-                    {
-                        var bodyParam = method.Parameters.FirstOrDefault(p => p.FromBody);
-                        if (bodyParam != null)
-                        {
-                            var bodyParamName = bodyParam.Name;
-                            sb.AppendLine($"    return this.http.delete<{returnType}>({url}, {{ headers, params, body: {bodyParamName} }});");
-                        }
-                        else
-                        {
-                            sb.AppendLine($"    return this.http.delete<{returnType}>({url}, {{ headers, params }});");
-                        }
-                    }
-                    else
-                    {
-                        sb.AppendLine($"    return this.http.get<{returnType}>({url}, {{ headers, params }});");
-                    }
+                    sb.AppendLine($"    return this.http.get<{returnType}>({url}, {{ headers, params }});");
                 }
                 else if (httpMethod == "POST" || httpMethod == "PUT")
                 {
@@ -153,31 +161,54 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return sb.ToString();
         }
 
+        private bool IsNullableType(ParameterInfo parameter)
+        {
+            if (parameter.ParameterType.IsValueType)
+            {
+                // Value types are nullable if they are Nullable<T>
+                return Nullable.GetUnderlyingType(parameter.ParameterType) != null;
+            }
+            else
+            {
+                // Treat reference types as non-nullable
+                return false;
+            }
+        }
+
         private string GetTypeScriptTypeName(Type type, HashSet<string> modelsToImport)
         {
             if (type == null || type == typeof(void))
                 return null;
 
-            if (IsBuiltInType(type))
+            var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+
+            if (IsBuiltInType(underlyingType))
             {
-                return GetTypeScriptPrimitiveType(type);
+                return GetTypeScriptPrimitiveType(underlyingType);
             }
 
-            if (IsCollectionType(type))
+            if (underlyingType.IsEnum)
             {
-                var itemType = GetCollectionItemType(type);
+                var enumName = underlyingType.Name;
+                modelsToImport.Add(enumName);
+                return enumName;
+            }
+
+            if (IsCollectionType(underlyingType))
+            {
+                var itemType = GetCollectionItemType(underlyingType);
                 var tsItemType = GetTypeScriptTypeName(itemType, modelsToImport);
                 return $"{tsItemType}[]";
             }
 
-            if (type.IsGenericType)
+            if (underlyingType.IsGenericType)
             {
-                var interfaceName = GetInterfaceName(type);
+                var interfaceName = GetInterfaceName(underlyingType);
                 modelsToImport.Add($"I{interfaceName}");
                 return $"I{interfaceName}";
             }
 
-            var typeName = $"I{type.Name}";
+            var typeName = $"I{underlyingType.Name}";
             modelsToImport.Add(typeName);
             return typeName;
         }
@@ -204,6 +235,11 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 return true;
             }
 
+            if (typeof(IEnumerable<>).IsAssignableFrom(type.GetTypeInfo()))
+            {
+                return true;
+            }
+
             if (typeof(IEnumerable).IsAssignableFrom(type))
             {
                 return true;
@@ -220,7 +256,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             }
             if (type.IsGenericType)
             {
-                return type.GetGenericArguments().First();
+                return type.GetGenericArguments().FirstOrDefault() ?? typeof(object);
             }
             return typeof(object);
         }

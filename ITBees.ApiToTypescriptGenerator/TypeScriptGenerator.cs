@@ -24,6 +24,12 @@ namespace ITBees.ApiToTypescriptGenerator
                     return null;
                 }
 
+                if (type.IsEnum)
+                {
+                    GenerateEnumModel(type, generatedModels);
+                    return generatedModels;
+                }
+
                 var sb = new StringBuilder();
 
                 string interfaceName = GetInterfaceName(type);
@@ -57,7 +63,9 @@ namespace ITBees.ApiToTypescriptGenerator
                 {
                     if (childInterfaceName != interfaceName)
                     {
-                        sbImports.AppendLine($"import {{ I{childInterfaceName} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childInterfaceName)}';");
+                        var importName = childInterfaceName;
+                        var fileName = TypeScriptFile.GetTypescriptFileNameWithoutTs(childInterfaceName);
+                        sbImports.AppendLine($"import {{ {importName} }} from './{fileName}';");
                     }
                 }
 
@@ -92,7 +100,14 @@ namespace ITBees.ApiToTypescriptGenerator
 
         private bool IsNullableType(Type type)
         {
-            return Nullable.GetUnderlyingType(type) != null;
+            if (!type.IsValueType)
+            {
+                return true;
+            }
+            else
+            {
+                return Nullable.GetUnderlyingType(type) != null;
+            }
         }
 
         private bool IsPrimitiveType(Type type)
@@ -129,6 +144,11 @@ namespace ITBees.ApiToTypescriptGenerator
                 }
             }
 
+            if (typeof(IEnumerable<>).IsAssignableFrom(type))
+            {
+                return true;
+            }
+
             return false;
         }
 
@@ -149,6 +169,13 @@ namespace ITBees.ApiToTypescriptGenerator
                     return "Date";
             }
 
+            if (underlyingType.IsEnum)
+            {
+                GenerateEnumModel(underlyingType, generatedModels);
+                generatedModels.RequiredImports.Add(underlyingType.Name);
+                return underlyingType.Name;
+            }
+
             if (IsCollectionType(underlyingType))
             {
                 var itemType = GetCollectionItemType(underlyingType);
@@ -166,12 +193,11 @@ namespace ITBees.ApiToTypescriptGenerator
                     return $"{GetTypescriptTypeFromType(innerType, generatedModels)} | null";
                 }
 
-                // For other generic types, we can generate a concrete interface
                 var concreteTypeName = GetInterfaceName(underlyingType);
                 Generate(underlyingType, generatedModels, true);
                 if (!IsCollectionType(underlyingType))
                 {
-                    generatedModels.RequiredImports.Add(concreteTypeName);
+                    generatedModels.RequiredImports.Add($"I{concreteTypeName}");
                 }
                 return $"I{concreteTypeName}";
             }
@@ -182,7 +208,7 @@ namespace ITBees.ApiToTypescriptGenerator
                 Generate(underlyingType, generatedModels, true);
                 if (!IsCollectionType(underlyingType))
                 {
-                    generatedModels.RequiredImports.Add(classTypeName);
+                    generatedModels.RequiredImports.Add($"I{classTypeName}");
                 }
                 return $"I{classTypeName}";
             }
@@ -203,17 +229,17 @@ namespace ITBees.ApiToTypescriptGenerator
             return typeof(object);
         }
 
-        private void GenerateEnumModel(PropertyInfo pi, TypeScriptGeneratedModels typescriptModels)
+        private void GenerateEnumModel(Type enumType, TypeScriptGeneratedModels typescriptModels)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"export enum {pi.PropertyType.Name} {{");
-            var enumValues = Enum.GetNames(pi.PropertyType);
+            sb.AppendLine($"export enum {enumType.Name} {{");
+            var enumValues = Enum.GetNames(enumType);
             foreach (var value in enumValues)
             {
-                sb.AppendLine($"    {value},");
+                sb.AppendLine($"    {value} = '{value}',");
             }
-            sb.AppendLine("}\r\n");
-            typescriptModels.AddNewObject(new TypescriptModel(sb.ToString(), pi.PropertyType.Name, pi.PropertyType));
+            sb.AppendLine("}");
+            typescriptModels.AddNewObject(new TypescriptModel(sb.ToString(), enumType.Name, enumType));
         }
     }
 }
