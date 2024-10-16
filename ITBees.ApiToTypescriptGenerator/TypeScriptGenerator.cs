@@ -161,7 +161,7 @@ namespace ITBees.ApiToTypescriptGenerator
                 {
                     interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
                 }
-                var typeArgumentNames = type.GetGenericArguments().Select(t => t.Name);
+                var typeArgumentNames = type.GetGenericArguments().Select(t => GetInterfaceName(t));
                 interfaceName += string.Join("", typeArgumentNames);
             }
 
@@ -211,30 +211,32 @@ namespace ITBees.ApiToTypescriptGenerator
         private string GetTypescriptTypeFromType(Type type)
         {
             var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
-            if (underlyingType == typeof(string))
+
+            if (IsPrimitiveType(underlyingType))
             {
-                return "string";
+                if (underlyingType == typeof(string) || underlyingType == typeof(Guid))
+                    return "string";
+                if (underlyingType == typeof(int) || underlyingType == typeof(long) || underlyingType == typeof(short) || underlyingType == typeof(decimal) || underlyingType == typeof(float) || underlyingType == typeof(double))
+                    return "number";
+                if (underlyingType == typeof(bool))
+                    return "boolean";
+                if (underlyingType == typeof(DateTime))
+                    return "Date";
             }
-            else if (underlyingType == typeof(int) || underlyingType == typeof(long) || underlyingType == typeof(short) || underlyingType == typeof(decimal) || underlyingType == typeof(float) || underlyingType == typeof(double))
+
+            if (IsCollectionType(underlyingType))
             {
-                return "number";
+                var itemType = GetCollectionItemType(underlyingType);
+                var tsItemType = GetTypescriptTypeFromType(itemType);
+                return $"{tsItemType}[]";
             }
-            else if (underlyingType == typeof(bool))
+
+            if (underlyingType.IsClass)
             {
-                return "boolean";
+                return $"I{GetInterfaceName(underlyingType)}";
             }
-            else if (underlyingType == typeof(Guid))
-            {
-                return "string";
-            }
-            else if (underlyingType == typeof(DateTime))
-            {
-                return "Date";
-            }
-            else
-            {
-                return "***undefined***";
-            }
+
+            return "any";
         }
 
         private void GenerateEnumModel(PropertyInfo pi, TypeScriptGeneratedModels typescriptModels)

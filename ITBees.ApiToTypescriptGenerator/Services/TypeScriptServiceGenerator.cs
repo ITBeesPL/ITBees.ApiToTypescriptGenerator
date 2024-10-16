@@ -34,7 +34,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             sb.AppendLine("import { Injectable } from '@angular/core';");
             sb.AppendLine("import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';");
             sb.AppendLine("import { Observable } from 'rxjs';");
-            sb.AppendLine("import { environment } from '../../environments/environment';");
+            sb.AppendLine("import { environment } from '../../app/environments/environments';");
 
             var modelsToImport = new HashSet<string>();
 
@@ -43,7 +43,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 var returnTypeName = GetTypeScriptTypeName(method.ReturnType);
                 if (returnTypeName != null && !IsBuiltInType(method.ReturnType))
                 {
-                    modelsToImport.Add(returnTypeName);
+                    modelsToImport.Add(GetBaseTypeName(returnTypeName));
                 }
 
                 foreach (var param in method.Parameters)
@@ -51,14 +51,16 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                     var paramTypeName = GetTypeScriptTypeName(param.ParameterType);
                     if (paramTypeName != null && !IsBuiltInType(param.ParameterType))
                     {
-                        modelsToImport.Add(paramTypeName);
+                        modelsToImport.Add(GetBaseTypeName(paramTypeName));
                     }
                 }
             }
 
+            // Generate import statements with correct file names
             foreach (var model in modelsToImport)
             {
-                sb.AppendLine($"import {{ {model} }} from '../models/{ToKebabCase(model.Replace("I", ""))}.model';");
+                var modelNameWithoutI = model.StartsWith("I") ? model.Substring(1) : model;
+                sb.AppendLine($"import {{ {model} }} from '../{ToKebabCase(modelNameWithoutI)}.model';");
             }
 
             sb.AppendLine("");
@@ -158,6 +160,15 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return sb.ToString();
         }
 
+        private string GetBaseTypeName(string typeName)
+        {
+            if (typeName.EndsWith("[]"))
+            {
+                return typeName.TrimEnd('[', ']');
+            }
+            return typeName;
+        }
+
         private string GetTypeScriptTypeName(Type type)
         {
             if (type == null || type == typeof(void))
@@ -168,30 +179,84 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 return GetTypeScriptPrimitiveType(type);
             }
 
+            if (type.IsArray)
+            {
+                var elementType = type.GetElementType();
+                var tsElementType = GetTypeScriptTypeName(elementType);
+                return $"{tsElementType}[]";
+            }
+
+            if (type.IsGenericType)
+            {
+                var genericTypeDefinition = type.GetGenericTypeDefinition();
+
+                if (genericTypeDefinition == typeof(List<>) || genericTypeDefinition == typeof(IEnumerable<>))
+                {
+                    var itemType = type.GetGenericArguments()[0];
+                    var tsItemType = GetTypeScriptTypeName(itemType);
+                    return $"{tsItemType}[]";
+                }
+
+                if (genericTypeDefinition == typeof(Nullable<>))
+                {
+                    var underlyingType = Nullable.GetUnderlyingType(type);
+                    return GetTypeScriptTypeName(underlyingType);
+                }
+
+                // Handle other generic types if needed
+                return "any";
+            }
+
             return $"I{type.Name}";
         }
 
         private bool IsBuiltInType(Type type)
         {
-            return type.IsPrimitive || type == typeof(string) || type == typeof(decimal) || type == typeof(DateTime) || type == typeof(Guid);
+            var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+            return underlyingType.IsPrimitive
+                || underlyingType == typeof(string)
+                || underlyingType == typeof(decimal)
+                || underlyingType == typeof(DateTime)
+                || underlyingType == typeof(Guid);
         }
 
         private string GetTypeScriptPrimitiveType(Type type)
         {
-            if (type == typeof(string) || type == typeof(Guid))
+            var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+
+            if (underlyingType == typeof(string) || underlyingType == typeof(Guid))
                 return "string";
-            if (type == typeof(int) || type == typeof(long) || type == typeof(float) || type == typeof(double) || type == typeof(decimal))
+            if (underlyingType == typeof(int) || underlyingType == typeof(long) || underlyingType == typeof(short) ||
+                underlyingType == typeof(decimal) || underlyingType == typeof(float) || underlyingType == typeof(double))
                 return "number";
-            if (type == typeof(bool))
+            if (underlyingType == typeof(bool))
                 return "boolean";
-            if (type == typeof(DateTime))
+            if (underlyingType == typeof(DateTime))
                 return "Date";
             return "any";
         }
 
         private string ToKebabCase(string input)
         {
-            return System.Text.RegularExpressions.Regex.Replace(input, "(\\B[A-Z])", "-$1").ToLower();
+            if (string.IsNullOrEmpty(input))
+                return input;
+
+            var sb = new StringBuilder();
+            sb.Append(char.ToLowerInvariant(input[0]));
+            for (int i = 1; i < input.Length; i++)
+            {
+                var c = input[i];
+                if (char.IsUpper(c))
+                {
+                    sb.Append('-');
+                    sb.Append(char.ToLowerInvariant(c));
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
         }
     }
 }
