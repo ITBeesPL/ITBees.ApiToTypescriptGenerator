@@ -20,7 +20,15 @@ public class AllControllersToTypescriptController : RestfulControllerBase<AllCon
     [HttpGet]
     public IActionResult Get()
     {
-        var result = _typescriptGeneratorService.GetAllControllersWithTypescriptModels();
-        return Ok(result);
+        try
+        {
+            var result = _typescriptGeneratorService.GetAllControllersWithTypescriptModels();
+            return Ok(result);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            throw;
+        }
     }
 }

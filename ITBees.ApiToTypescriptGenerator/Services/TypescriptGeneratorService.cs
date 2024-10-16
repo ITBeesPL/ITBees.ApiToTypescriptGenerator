@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -78,19 +79,13 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                     FromRoute = fromRoute
                                 });
 
-                                if (CheckTypeNeedsGeneration(parameterType))
-                                {
-                                    var typeScriptGeneratedModels = typeScriptGenerator.Generate(parameterType.Name, new TypeScriptGeneratedModels(), true);
-                                    AddGeneratedModels(typeScriptGeneratedModels, generatedTypescriptModels, generatedModelTypes);
-                                }
+                                // Generate models for parameter types, including generic arguments
+                                GenerateModelsForType(parameterType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
                             }
 
                             var returnType = GetActionReturnType(methodInfo);
-                            if (CheckTypeNeedsGeneration(returnType))
-                            {
-                                var typeScriptGeneratedModels = typeScriptGenerator.Generate(returnType.Name, new TypeScriptGeneratedModels(), true);
-                                AddGeneratedModels(typeScriptGeneratedModels, generatedTypescriptModels, generatedModelTypes);
-                            }
+                            // Generate models for return types, including generic arguments
+                            GenerateModelsForType(returnType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
 
                             var serviceMethod = new ServiceMethod
                             {
@@ -104,14 +99,17 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                         }
                     }
 
+                    // Write models to zip archive
                     foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
                     {
                         AddEntryToZipArchive(zipArchive, generatedTypescriptModel.FileName, generatedTypescriptModel.FileContent);
                     }
 
+                    // Generate the services
                     var serviceGenerator = new TypeScriptServiceGenerator();
                     generatedServices = serviceGenerator.GenerateServices(serviceMethods);
 
+                    // Write the generated services to the zip file
                     foreach (var service in generatedServices)
                     {
                         var serviceFileName = $"api-services/{ToKebabCase(service.Key)}.service.ts";
@@ -165,15 +163,30 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return returnType;
         }
 
-        private bool CheckTypeNeedsGeneration(Type type)
+        private void GenerateModelsForType(Type type, TypeScriptGenerator typeScriptGenerator, Dictionary<string, TypeScriptFile> generatedTypescriptModels, HashSet<Type> generatedModelTypes)
         {
-            if (type == null || type == typeof(void))
-                return false;
+            if (type == null || IsBuiltInType(type) || generatedModelTypes.Contains(type))
+            {
+                return;
+            }
 
-            if (IsBuiltInType(type))
-                return false;
+            generatedModelTypes.Add(type);
 
-            return true;
+            var typeScriptGeneratedModels = typeScriptGenerator.Generate(type, new TypeScriptGeneratedModels(), true);
+            AddGeneratedModels(typeScriptGeneratedModels, generatedTypescriptModels, generatedModelTypes);
+
+            if (type.IsGenericType)
+            {
+                foreach (var arg in type.GetGenericArguments())
+                {
+                    GenerateModelsForType(arg, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
+                }
+            }
+            else if (IsCollectionType(type))
+            {
+                var itemType = GetCollectionItemType(type);
+                GenerateModelsForType(itemType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
+            }
         }
 
         private bool IsBuiltInType(Type type)
@@ -184,6 +197,24 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 || underlyingType == typeof(decimal)
                 || underlyingType == typeof(DateTime)
                 || underlyingType == typeof(Guid);
+        }
+
+        private bool IsCollectionType(Type type)
+        {
+            return typeof(IEnumerable).IsAssignableFrom(type) && type != typeof(string);
+        }
+
+        private Type GetCollectionItemType(Type type)
+        {
+            if (type.IsArray)
+            {
+                return type.GetElementType();
+            }
+            if (type.IsGenericType)
+            {
+                return type.GetGenericArguments().First();
+            }
+            return typeof(object);
         }
 
         private void AddGeneratedModels(TypeScriptGeneratedModels typeScriptGeneratedModels, Dictionary<string, TypeScriptFile> generatedTypescriptModels, HashSet<Type> generatedModelTypes)
@@ -217,7 +248,25 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 
         private string ToKebabCase(string input)
         {
-            return System.Text.RegularExpressions.Regex.Replace(input, "(\\B[A-Z])", "-$1").ToLower();
+            if (string.IsNullOrEmpty(input))
+                return input;
+
+            var sb = new StringBuilder();
+            sb.Append(char.ToLowerInvariant(input[0]));
+            for (int i = 1; i < input.Length; i++)
+            {
+                var c = input[i];
+                if (char.IsUpper(c))
+                {
+                    sb.Append('-');
+                    sb.Append(char.ToLowerInvariant(c));
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
         }
     }
 }

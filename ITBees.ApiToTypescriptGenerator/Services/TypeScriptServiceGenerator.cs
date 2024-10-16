@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -40,19 +41,11 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 
             foreach (var method in methods)
             {
-                var returnTypeName = GetTypeScriptTypeName(method.ReturnType);
-                if (returnTypeName != null && !IsBuiltInType(method.ReturnType))
-                {
-                    modelsToImport.Add(GetBaseTypeName(returnTypeName));
-                }
+                var returnTypeName = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
 
                 foreach (var param in method.Parameters)
                 {
-                    var paramTypeName = GetTypeScriptTypeName(param.ParameterType);
-                    if (paramTypeName != null && !IsBuiltInType(param.ParameterType))
-                    {
-                        modelsToImport.Add(GetBaseTypeName(paramTypeName));
-                    }
+                    var paramTypeName = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
                 }
             }
 
@@ -79,13 +72,13 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 var methodName = method.ActionName.ToLowerFirstChar();
                 var httpMethod = method.HttpMethod.ToUpper();
-                var returnType = GetTypeScriptTypeName(method.ReturnType);
+                var returnType = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
                 var returnTypeString = returnType != null ? $"Observable<{returnType}>" : "Observable<void>";
 
                 var parametersList = new List<string>();
                 foreach (var param in method.Parameters)
                 {
-                    var paramType = GetTypeScriptTypeName(param.ParameterType);
+                    var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
                     parametersList.Add($"{param.Name}: {paramType}");
                 }
                 var parametersString = string.Join(", ", parametersList);
@@ -160,16 +153,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return sb.ToString();
         }
 
-        private string GetBaseTypeName(string typeName)
-        {
-            if (typeName.EndsWith("[]"))
-            {
-                return typeName.TrimEnd('[', ']');
-            }
-            return typeName;
-        }
-
-        private string GetTypeScriptTypeName(Type type)
+        private string GetTypeScriptTypeName(Type type, HashSet<string> modelsToImport)
         {
             if (type == null || type == typeof(void))
                 return null;
@@ -179,35 +163,23 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 return GetTypeScriptPrimitiveType(type);
             }
 
-            if (type.IsArray)
+            if (IsCollectionType(type))
             {
-                var elementType = type.GetElementType();
-                var tsElementType = GetTypeScriptTypeName(elementType);
-                return $"{tsElementType}[]";
+                var itemType = GetCollectionItemType(type);
+                var tsItemType = GetTypeScriptTypeName(itemType, modelsToImport);
+                return $"{tsItemType}[]";
             }
 
             if (type.IsGenericType)
             {
-                var genericTypeDefinition = type.GetGenericTypeDefinition();
-
-                if (genericTypeDefinition == typeof(List<>) || genericTypeDefinition == typeof(IEnumerable<>))
-                {
-                    var itemType = type.GetGenericArguments()[0];
-                    var tsItemType = GetTypeScriptTypeName(itemType);
-                    return $"{tsItemType}[]";
-                }
-
-                if (genericTypeDefinition == typeof(Nullable<>))
-                {
-                    var underlyingType = Nullable.GetUnderlyingType(type);
-                    return GetTypeScriptTypeName(underlyingType);
-                }
-
-                // Handle other generic types if needed
-                return "any";
+                var interfaceName = GetInterfaceName(type);
+                modelsToImport.Add($"I{interfaceName}");
+                return $"I{interfaceName}";
             }
 
-            return $"I{type.Name}";
+            var typeName = $"I{type.Name}";
+            modelsToImport.Add(typeName);
+            return typeName;
         }
 
         private bool IsBuiltInType(Type type)
@@ -218,6 +190,58 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 || underlyingType == typeof(decimal)
                 || underlyingType == typeof(DateTime)
                 || underlyingType == typeof(Guid);
+        }
+
+        private bool IsCollectionType(Type type)
+        {
+            if (type == typeof(string))
+            {
+                return false;
+            }
+
+            if (type.IsArray)
+            {
+                return true;
+            }
+
+            if (typeof(IEnumerable).IsAssignableFrom(type))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private Type GetCollectionItemType(Type type)
+        {
+            if (type.IsArray)
+            {
+                return type.GetElementType();
+            }
+            if (type.IsGenericType)
+            {
+                return type.GetGenericArguments().First();
+            }
+            return typeof(object);
+        }
+
+        private string GetInterfaceName(Type type)
+        {
+            var interfaceName = type.Name;
+
+            if (type.IsGenericType)
+            {
+                if (interfaceName.Contains('`'))
+                {
+                    interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
+                }
+
+                var genericArgs = type.GetGenericArguments();
+                var genericArgNames = string.Join("", genericArgs.Select(arg => GetInterfaceName(arg)));
+                interfaceName += genericArgNames;
+            }
+
+            return interfaceName;
         }
 
         private string GetTypeScriptPrimitiveType(Type type)

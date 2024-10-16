@@ -23,7 +23,23 @@ namespace ITBees.ApiToTypescriptGenerator.Controllers
             try
             {
                 var typeScriptGenerator = new TypeScriptGenerator();
-                var result = typeScriptGenerator.Generate(viewModelName, new TypeScriptGeneratedModels(),false);
+
+                // Try to get the Type from the provided viewModelName
+                Type type = Type.GetType(viewModelName);
+                if (type == null)
+                {
+                    // If Type.GetType() didn't find it, search all loaded assemblies
+                    type = AppDomain.CurrentDomain.GetAssemblies()
+                        .SelectMany(a => a.GetTypes())
+                        .FirstOrDefault(t => t.Name == viewModelName || t.FullName == viewModelName);
+                }
+
+                if (type == null)
+                {
+                    return BadRequest($"Type '{viewModelName}' not found.");
+                }
+
+                var result = typeScriptGenerator.Generate(type, new TypeScriptGeneratedModels(), false);
                 return Ok(new TypeScriptModelsVm() { Models = result.ToString() });
             }
             catch (Exception e)
@@ -32,4 +48,5 @@ namespace ITBees.ApiToTypescriptGenerator.Controllers
             }
         }
     }
+
 }

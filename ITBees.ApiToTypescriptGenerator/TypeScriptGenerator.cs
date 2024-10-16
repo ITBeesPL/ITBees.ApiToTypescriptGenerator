@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -10,61 +9,26 @@ namespace ITBees.ApiToTypescriptGenerator
 {
     public class TypeScriptGenerator
     {
-        public TypeScriptGeneratedModels Generate(string viewModelName, TypeScriptGeneratedModels generatedModels, bool skipChildGeneration, Type[] genericTypeArguments = null)
+        public TypeScriptGeneratedModels Generate(Type type, TypeScriptGeneratedModels generatedModels, bool skipChildGeneration)
         {
             PropertyInfo currentPi = null;
             try
             {
-                if (viewModelName == "FileContentResult")
+                if (type == null)
+                {
+                    throw new Exception($"Type is null.");
+                }
+
+                if (type.Name == "FileContentResult")
                 {
                     return null;
                 }
+
                 var sb = new StringBuilder();
-                Type type = null;
-                Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
-                foreach (Assembly assembly in assemblies)
-                {
-                    if (viewModelName.Contains("`"))
-                    {
-                        type = assembly.GetTypes().FirstOrDefault(t => t.Name == viewModelName);
-                    }
-                    else if (viewModelName.Contains("."))
-                    {
-                        type = assembly.GetTypes().FirstOrDefault(x => x.FullName == viewModelName);
-                    }
-                    else
-                    {
-                        type = assembly.GetTypes().FirstOrDefault(x => x.Name == viewModelName);
-                    }
-
-                    if (type == null)
-                        continue;
-
-                    break;
-                }
-
-                if (type == null)
-                {
-                    throw new Exception($"Type {viewModelName} not found.");
-                }
 
                 string interfaceName = GetInterfaceName(type);
-                if (type.IsGenericTypeDefinition)
-                {
-                    if (genericTypeArguments != null)
-                    {
-                        type = type.MakeGenericType(genericTypeArguments);
-                        interfaceName = GetInterfaceName(type);
-                    }
-                    else
-                    {
-                        throw new Exception($"Generic type arguments required for type {viewModelName}.");
-                    }
-                }
 
                 sb.AppendLine($"export interface I{interfaceName} {{");
-
-                var childViewModels = new HashSet<string>();
 
                 var properties = type.GetProperties();
 
@@ -77,54 +41,10 @@ namespace ITBees.ApiToTypescriptGenerator
                     bool isNullable = IsNullableType(propertyType);
                     propertyType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
 
-                    if (IsPrimitiveType(propertyType))
-                    {
-                        sb.AppendLine($"    {GetTypescriptPropertyLine(pi, isNullable)};");
-                        continue;
-                    }
+                    var tsType = GetTypescriptTypeFromType(propertyType, generatedModels);
 
-                    if (propertyType.IsEnum)
-                    {
-                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {propertyType.Name};");
-                        GenerateEnumModel(pi, generatedModels);
-                        continue;
-                    }
-
-                    if (IsCollectionType(propertyType))
-                    {
-                        Type itemType = GetCollectionItemType(propertyType);
-
-                        if (IsPrimitiveType(itemType))
-                        {
-                            var tsType = GetTypescriptTypeFromType(itemType);
-                            sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: {tsType}[];");
-                        }
-                        else
-                        {
-                            var childInterfaceName = GetInterfaceName(itemType);
-
-                            Generate(itemType.Name, generatedModels, true, itemType.IsGenericType ? itemType.GetGenericArguments() : null);
-
-                            sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName}[];");
-
-                            childViewModels.Add(childInterfaceName);
-                        }
-                        continue;
-                    }
-
-                    if (propertyType.IsClass && propertyType != typeof(string))
-                    {
-                        var childInterfaceName = GetInterfaceName(propertyType);
-
-                        Generate(propertyType.Name, generatedModels, true, propertyType.IsGenericType ? propertyType.GetGenericArguments() : null);
-
-                        sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}: I{childInterfaceName};");
-
-                        childViewModels.Add(childInterfaceName);
-                        continue;
-                    }
-
-                    sb.AppendLine($"    {pi.Name.ToLowerFirstChar()} : any;");
+                    var nullableSign = isNullable ? "?" : "";
+                    sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}{nullableSign}: {tsType};");
                 }
 
                 sb.AppendLine("}");
@@ -133,20 +53,20 @@ namespace ITBees.ApiToTypescriptGenerator
                 generatedModels.AddNewObject(typescriptModel);
 
                 var sbImports = new StringBuilder();
-                foreach (var childInterfaceName in childViewModels)
+                foreach (var childInterfaceName in generatedModels.RequiredImports)
                 {
-                    var importLine = $"import {{ I{childInterfaceName} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childInterfaceName)}';";
-                    if (!sbImports.ToString().Contains(importLine) && childInterfaceName != interfaceName)
+                    if (childInterfaceName != interfaceName)
                     {
-                        sbImports.AppendLine(importLine);
+                        sbImports.AppendLine($"import {{ I{childInterfaceName} }} from './{TypeScriptFile.GetTypescriptFileNameWithoutTs(childInterfaceName)}';");
                     }
                 }
 
                 typescriptModel.SetModel(sbImports + typescriptModel.Model);
+                generatedModels.RequiredImports.Clear();
             }
             catch (Exception e)
             {
-                generatedModels.AddNewObject(new TypescriptModel($"\t\t\t>>>> An error occurred while generating class {viewModelName} (property - {currentPi?.Name}), check manually, error: " + e.Message, viewModelName, null));
+                generatedModels.AddNewObject(new TypescriptModel($"\t\t\t>>>> An error occurred while generating class {type.Name} (property - {currentPi?.Name}), check manually, error: " + e.Message, type.Name, null));
             }
             return generatedModels;
         }
@@ -161,8 +81,10 @@ namespace ITBees.ApiToTypescriptGenerator
                 {
                     interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
                 }
-                var typeArgumentNames = type.GetGenericArguments().Select(t => GetInterfaceName(t));
-                interfaceName += string.Join("", typeArgumentNames);
+
+                var genericArgs = type.GetGenericArguments();
+                var genericArgNames = string.Join("", genericArgs.Select(arg => GetInterfaceName(arg)));
+                interfaceName += genericArgNames;
             }
 
             return interfaceName;
@@ -185,7 +107,87 @@ namespace ITBees.ApiToTypescriptGenerator
 
         private bool IsCollectionType(Type type)
         {
-            return typeof(IEnumerable).IsAssignableFrom(type) && type != typeof(string);
+            if (type == typeof(string))
+            {
+                return false;
+            }
+
+            if (type.IsArray)
+            {
+                return true;
+            }
+
+            if (type.IsGenericType)
+            {
+                var genericTypeDefinition = type.GetGenericTypeDefinition();
+                if (genericTypeDefinition == typeof(IEnumerable<>) ||
+                    genericTypeDefinition == typeof(ICollection<>) ||
+                    genericTypeDefinition == typeof(IList<>) ||
+                    genericTypeDefinition == typeof(List<>))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private string GetTypescriptTypeFromType(Type type, TypeScriptGeneratedModels generatedModels)
+        {
+            var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+
+            if (IsPrimitiveType(underlyingType))
+            {
+                if (underlyingType == typeof(string) || underlyingType == typeof(Guid))
+                    return "string";
+                if (underlyingType == typeof(int) || underlyingType == typeof(long) || underlyingType == typeof(short) ||
+                    underlyingType == typeof(decimal) || underlyingType == typeof(float) || underlyingType == typeof(double))
+                    return "number";
+                if (underlyingType == typeof(bool))
+                    return "boolean";
+                if (underlyingType == typeof(DateTime))
+                    return "Date";
+            }
+
+            if (IsCollectionType(underlyingType))
+            {
+                var itemType = GetCollectionItemType(underlyingType);
+                var tsItemType = GetTypescriptTypeFromType(itemType, generatedModels);
+                return $"{tsItemType}[]";
+            }
+
+            if (underlyingType.IsGenericType)
+            {
+                var genericTypeDefinition = underlyingType.GetGenericTypeDefinition();
+
+                if (genericTypeDefinition == typeof(Nullable<>))
+                {
+                    var innerType = underlyingType.GetGenericArguments().First();
+                    return $"{GetTypescriptTypeFromType(innerType, generatedModels)} | null";
+                }
+
+                // For other generic types, we can generate a concrete interface
+                var concreteTypeName = GetInterfaceName(underlyingType);
+                Generate(underlyingType, generatedModels, true);
+                if (!IsCollectionType(underlyingType))
+                {
+                    generatedModels.RequiredImports.Add(concreteTypeName);
+                }
+                return $"I{concreteTypeName}";
+            }
+
+            if (underlyingType.IsClass && underlyingType != typeof(string))
+            {
+                var classTypeName = GetInterfaceName(underlyingType);
+                Generate(underlyingType, generatedModels, true);
+                if (!IsCollectionType(underlyingType))
+                {
+                    generatedModels.RequiredImports.Add(classTypeName);
+                }
+                return $"I{classTypeName}";
+            }
+
+            return "any";
         }
 
         private Type GetCollectionItemType(Type type)
@@ -199,44 +201,6 @@ namespace ITBees.ApiToTypescriptGenerator
                 return type.GetGenericArguments().First();
             }
             return typeof(object);
-        }
-
-        private string GetTypescriptPropertyLine(PropertyInfo pi, bool nullable)
-        {
-            var typescriptType = GetTypescriptTypeFromType(pi.PropertyType);
-            var nullableSign = nullable ? "?" : "";
-            return $"{pi.Name.ToLowerFirstChar()}{nullableSign}: {typescriptType}";
-        }
-
-        private string GetTypescriptTypeFromType(Type type)
-        {
-            var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
-
-            if (IsPrimitiveType(underlyingType))
-            {
-                if (underlyingType == typeof(string) || underlyingType == typeof(Guid))
-                    return "string";
-                if (underlyingType == typeof(int) || underlyingType == typeof(long) || underlyingType == typeof(short) || underlyingType == typeof(decimal) || underlyingType == typeof(float) || underlyingType == typeof(double))
-                    return "number";
-                if (underlyingType == typeof(bool))
-                    return "boolean";
-                if (underlyingType == typeof(DateTime))
-                    return "Date";
-            }
-
-            if (IsCollectionType(underlyingType))
-            {
-                var itemType = GetCollectionItemType(underlyingType);
-                var tsItemType = GetTypescriptTypeFromType(itemType);
-                return $"{tsItemType}[]";
-            }
-
-            if (underlyingType.IsClass)
-            {
-                return $"I{GetInterfaceName(underlyingType)}";
-            }
-
-            return "any";
         }
 
         private void GenerateEnumModel(PropertyInfo pi, TypeScriptGeneratedModels typescriptModels)

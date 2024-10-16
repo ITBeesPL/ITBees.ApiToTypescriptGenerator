@@ -5,6 +5,7 @@ namespace ITBees.ApiToTypescriptGenerator
     public class TypeScriptGeneratedModels
     {
         public List<TypescriptModel> GeneratedModels { get; } = new List<TypescriptModel>();
+        public HashSet<string> RequiredImports { get; } = new HashSet<string>();
 
         public void AddNewObject(TypescriptModel model)
         {
