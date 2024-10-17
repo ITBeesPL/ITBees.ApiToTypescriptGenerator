@@ -27,6 +27,10 @@ namespace ITBees.ApiToTypescriptGenerator.Services.Models
 
         public static string ConvertToTypescriptFileNameConvention(string typeName)
         {
+            if (typeName.StartsWith("I") && typeName.Length > 1 && char.IsUpper(typeName[1]))
+            {
+                typeName = typeName.Substring(1);
+            }
             return Regex.Replace(typeName, "(\\B[A-Z])", "-$1").ToLower();
         }
     }

@@ -38,6 +38,8 @@ namespace ITBees.ApiToTypescriptGenerator
 
                 var properties = type.GetProperties();
 
+                var requiredImports = new HashSet<string>();
+
                 foreach (PropertyInfo pi in properties)
                 {
                     currentPi = pi;
@@ -47,7 +49,7 @@ namespace ITBees.ApiToTypescriptGenerator
                     bool isNullable = IsNullableType(propertyType);
                     propertyType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
 
-                    var tsType = GetTypescriptTypeFromType(propertyType, generatedModels);
+                    var tsType = GetTypescriptTypeFromType(propertyType, generatedModels, requiredImports);
 
                     var nullableSign = isNullable ? "?" : "";
                     sb.AppendLine($"    {pi.Name.ToLowerFirstChar()}{nullableSign}: {tsType};");
@@ -56,21 +58,21 @@ namespace ITBees.ApiToTypescriptGenerator
                 sb.AppendLine("}");
 
                 var typescriptModel = new TypescriptModel(sb.ToString(), interfaceName, type);
+                typescriptModel.AddRequiredImports(requiredImports);
                 generatedModels.AddNewObject(typescriptModel);
 
                 var sbImports = new StringBuilder();
-                foreach (var childInterfaceName in generatedModels.RequiredImports)
+                foreach (var childInterfaceName in typescriptModel.RequiredImports)
                 {
-                    if (childInterfaceName != interfaceName)
+                    if (childInterfaceName != $"I{interfaceName}")
                     {
                         var importName = childInterfaceName;
-                        var fileName = TypeScriptFile.GetTypescriptFileNameWithoutTs(childInterfaceName);
+                        var fileName = TypeScriptFile.GetTypescriptFileNameWithoutTs(importName);
                         sbImports.AppendLine($"import {{ {importName} }} from './{fileName}';");
                     }
                 }
 
                 typescriptModel.SetModel(sbImports + typescriptModel.Model);
-                generatedModels.RequiredImports.Clear();
             }
             catch (Exception e)
             {
@@ -82,6 +84,11 @@ namespace ITBees.ApiToTypescriptGenerator
         private string GetInterfaceName(Type type)
         {
             var interfaceName = type.Name;
+
+            if (interfaceName.StartsWith("I") && interfaceName.Length > 1 && char.IsUpper(interfaceName[1]))
+            {
+                interfaceName = interfaceName.Substring(1);
+            }
 
             if (type.IsGenericType)
             {
@@ -152,7 +159,7 @@ namespace ITBees.ApiToTypescriptGenerator
             return false;
         }
 
-        private string GetTypescriptTypeFromType(Type type, TypeScriptGeneratedModels generatedModels)
+        private string GetTypescriptTypeFromType(Type type, TypeScriptGeneratedModels generatedModels, HashSet<string> requiredImports)
         {
             var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
 
@@ -172,14 +179,14 @@ namespace ITBees.ApiToTypescriptGenerator
             if (underlyingType.IsEnum)
             {
                 GenerateEnumModel(underlyingType, generatedModels);
-                generatedModels.RequiredImports.Add(underlyingType.Name);
+                requiredImports.Add(underlyingType.Name);
                 return underlyingType.Name;
             }
 
             if (IsCollectionType(underlyingType))
             {
                 var itemType = GetCollectionItemType(underlyingType);
-                var tsItemType = GetTypescriptTypeFromType(itemType, generatedModels);
+                var tsItemType = GetTypescriptTypeFromType(itemType, generatedModels, requiredImports);
                 return $"{tsItemType}[]";
             }
 
@@ -190,14 +197,14 @@ namespace ITBees.ApiToTypescriptGenerator
                 if (genericTypeDefinition == typeof(Nullable<>))
                 {
                     var innerType = underlyingType.GetGenericArguments().First();
-                    return $"{GetTypescriptTypeFromType(innerType, generatedModels)} | null";
+                    return $"{GetTypescriptTypeFromType(innerType, generatedModels, requiredImports)} | null";
                 }
 
                 var concreteTypeName = GetInterfaceName(underlyingType);
                 Generate(underlyingType, generatedModels, true);
                 if (!IsCollectionType(underlyingType))
                 {
-                    generatedModels.RequiredImports.Add($"I{concreteTypeName}");
+                    requiredImports.Add($"I{concreteTypeName}");
                 }
                 return $"I{concreteTypeName}";
             }
@@ -208,7 +215,7 @@ namespace ITBees.ApiToTypescriptGenerator
                 Generate(underlyingType, generatedModels, true);
                 if (!IsCollectionType(underlyingType))
                 {
-                    generatedModels.RequiredImports.Add($"I{classTypeName}");
+                    requiredImports.Add($"I{classTypeName}");
                 }
                 return $"I{classTypeName}";
             }

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace ITBees.ApiToTypescriptGenerator
 {
@@ -8,6 +9,7 @@ namespace ITBees.ApiToTypescriptGenerator
         public string TypeName { get; private set; }
         public string ClassType { get; private set; }
         public Type OriginalType { get; private set; }
+        public HashSet<string> RequiredImports { get; } = new HashSet<string>();
 
         public TypescriptModel(string model, string typeName, Type originalType)
         {
@@ -20,6 +22,11 @@ namespace ITBees.ApiToTypescriptGenerator
         public void SetModel(string model)
         {
             Model = model;
+        }
+
+        public void AddRequiredImports(IEnumerable<string> imports)
+        {
+            RequiredImports.UnionWith(imports);
         }
     }
 }
