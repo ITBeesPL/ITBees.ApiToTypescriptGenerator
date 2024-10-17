@@ -116,9 +116,12 @@ namespace ITBees.ApiToTypescriptGenerator
             {
                 if (typeName.StartsWith("I") && typeName.Length > 1 && char.IsUpper(typeName[1]))
                 {
-                    typeName = typeName.Substring(1);
+                    typeName = typeName;
                 }
-                typeName = $"I{typeName}";
+                else
+                {
+                    typeName = $"I{typeName}";
+                }
             }
 
             return typeName;

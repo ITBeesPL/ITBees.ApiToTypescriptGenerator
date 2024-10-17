@@ -50,7 +50,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 }
             }
 
-            // Generate import statements with correct file names
             foreach (var model in modelsToImport)
             {
                 var modelNameWithoutI = model.StartsWith("I") && char.IsUpper(model[1]) ? model.Substring(1) : model;
@@ -169,12 +168,10 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         {
             if (parameter.ParameterType.IsValueType)
             {
-                // Value types are nullable if they are Nullable<T>
                 return Nullable.GetUnderlyingType(parameter.ParameterType) != null;
             }
             else
             {
-                // Reference types are nullable
                 return true;
             }
         }
@@ -186,7 +183,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 
             var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
 
-            // Handle IActionResult and ActionResult types
             if (underlyingType.Name == "IActionResult" || underlyingType.Name.StartsWith("ActionResult"))
             {
                 return "void";
@@ -215,7 +211,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 var interfaceName = GetInterfaceName(underlyingType);
 
-                // Add models for generic arguments
                 foreach (var arg in underlyingType.GetGenericArguments())
                 {
                     GetTypeScriptTypeName(arg, modelsToImport);
@@ -286,19 +281,34 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 var baseName = typeName.Contains('`') ? typeName.Substring(0, typeName.IndexOf('`')) : typeName;
 
-                var genericArgs = type.GetGenericArguments();
-                var genericArgNames = string.Join("", genericArgs.Select(arg => GetInterfaceName(arg).TrimStart('I')));
+                if (baseName.StartsWith("I") && baseName.Length > 1 && char.IsUpper(baseName[1]))
+                {
+                    baseName = baseName.Substring(1);
+                }
 
-                typeName = $"{baseName}{genericArgNames}";
-            }
-            else if (typeName.StartsWith("I") && typeName.Length > 1 && char.IsUpper(typeName[1]))
-            {
-                // Do not add an extra 'I'
-                return typeName;
+                var genericArgs = type.GetGenericArguments();
+                var genericArgNames = string.Join("", genericArgs.Select(arg =>
+                {
+                    var argName = GetInterfaceName(arg);
+                    if (argName.StartsWith("I") && argName.Length > 1 && char.IsUpper(argName[1]))
+                    {
+                        argName = argName.Substring(1);
+                    }
+                    return argName;
+                }));
+
+                typeName = $"I{baseName}{genericArgNames}";
             }
             else
             {
-                typeName = $"I{typeName}";
+                if (typeName.StartsWith("I") && typeName.Length > 1 && char.IsUpper(typeName[1]))
+                {
+                    typeName = typeName;
+                }
+                else
+                {
+                    typeName = $"I{typeName}";
+                }
             }
 
             return typeName;
