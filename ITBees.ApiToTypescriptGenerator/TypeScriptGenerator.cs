@@ -24,6 +24,11 @@ namespace ITBees.ApiToTypescriptGenerator
                     return null;
                 }
 
+                if (type.Name == "IActionResult" || type.Name.StartsWith("ActionResult"))
+                {
+                    return generatedModels;
+                }
+
                 if (type.IsEnum)
                 {
                     GenerateEnumModel(type, generatedModels);
@@ -34,7 +39,7 @@ namespace ITBees.ApiToTypescriptGenerator
 
                 string interfaceName = GetInterfaceName(type);
 
-                sb.AppendLine($"export interface I{interfaceName} {{");
+                sb.AppendLine($"export interface {interfaceName} {{");
 
                 var properties = type.GetProperties();
 
@@ -64,7 +69,7 @@ namespace ITBees.ApiToTypescriptGenerator
                 var sbImports = new StringBuilder();
                 foreach (var childInterfaceName in typescriptModel.RequiredImports)
                 {
-                    if (childInterfaceName != $"I{interfaceName}")
+                    if (childInterfaceName != interfaceName)
                     {
                         var importName = childInterfaceName;
                         var fileName = TypeScriptFile.GetTypescriptFileNameWithoutTs(importName);
@@ -83,26 +88,40 @@ namespace ITBees.ApiToTypescriptGenerator
 
         private string GetInterfaceName(Type type)
         {
-            var interfaceName = type.Name;
-
-            if (interfaceName.StartsWith("I") && interfaceName.Length > 1 && char.IsUpper(interfaceName[1]))
-            {
-                interfaceName = interfaceName.Substring(1);
-            }
+            var typeName = type.Name;
 
             if (type.IsGenericType)
             {
-                if (interfaceName.Contains('`'))
+                var baseName = typeName.Contains('`') ? typeName.Substring(0, typeName.IndexOf('`')) : typeName;
+
+                if (baseName.StartsWith("I") && baseName.Length > 1 && char.IsUpper(baseName[1]))
                 {
-                    interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
+                    baseName = baseName.Substring(1);
                 }
 
                 var genericArgs = type.GetGenericArguments();
-                var genericArgNames = string.Join("", genericArgs.Select(arg => GetInterfaceName(arg)));
-                interfaceName += genericArgNames;
+                var genericArgNames = string.Join("", genericArgs.Select(arg =>
+                {
+                    var argName = GetInterfaceName(arg);
+                    if (argName.StartsWith("I") && argName.Length > 1 && char.IsUpper(argName[1]))
+                    {
+                        argName = argName.Substring(1);
+                    }
+                    return argName;
+                }));
+
+                typeName = $"I{baseName}{genericArgNames}";
+            }
+            else
+            {
+                if (typeName.StartsWith("I") && typeName.Length > 1 && char.IsUpper(typeName[1]))
+                {
+                    typeName = typeName.Substring(1);
+                }
+                typeName = $"I{typeName}";
             }
 
-            return interfaceName;
+            return typeName;
         }
 
         private bool IsNullableType(Type type)
@@ -200,13 +219,20 @@ namespace ITBees.ApiToTypescriptGenerator
                     return $"{GetTypescriptTypeFromType(innerType, generatedModels, requiredImports)} | null";
                 }
 
-                var concreteTypeName = GetInterfaceName(underlyingType);
+                var interfaceName = GetInterfaceName(underlyingType);
+
+                foreach (var arg in underlyingType.GetGenericArguments())
+                {
+                    Generate(arg, generatedModels, true);
+                }
+
                 Generate(underlyingType, generatedModels, true);
+
                 if (!IsCollectionType(underlyingType))
                 {
-                    requiredImports.Add($"I{concreteTypeName}");
+                    requiredImports.Add(interfaceName);
                 }
-                return $"I{concreteTypeName}";
+                return interfaceName;
             }
 
             if (underlyingType.IsClass && underlyingType != typeof(string))
@@ -215,9 +241,9 @@ namespace ITBees.ApiToTypescriptGenerator
                 Generate(underlyingType, generatedModels, true);
                 if (!IsCollectionType(underlyingType))
                 {
-                    requiredImports.Add($"I{classTypeName}");
+                    requiredImports.Add(classTypeName);
                 }
-                return $"I{classTypeName}";
+                return classTypeName;
             }
 
             return "any";

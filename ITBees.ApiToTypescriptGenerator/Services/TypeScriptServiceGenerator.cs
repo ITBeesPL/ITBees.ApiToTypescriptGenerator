@@ -53,7 +53,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             // Generate import statements with correct file names
             foreach (var model in modelsToImport)
             {
-                var modelNameWithoutI = model.StartsWith("I") ? model.Substring(1) : model;
+                var modelNameWithoutI = model.StartsWith("I") && char.IsUpper(model[1]) ? model.Substring(1) : model;
                 var fileName = ToKebabCase(modelNameWithoutI);
                 sb.AppendLine($"import {{ {model} }} from '../{fileName}.model';");
             }
@@ -75,7 +75,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 var methodName = method.ActionName.ToLowerFirstChar();
                 var httpMethod = method.HttpMethod.ToUpper();
                 var returnType = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
-                var returnTypeString = returnType != null ? $"Observable<{returnType}>" : "Observable<void>";
+                var returnTypeString = returnType != "void" ? $"Observable<{returnType}>" : "Observable<void>";
 
                 var requiredParameters = new List<string>();
                 var optionalParameters = new List<string>();
@@ -113,20 +113,24 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             var paramName = param.Name;
                             var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
                             sb.AppendLine($"    if ({paramName} !== undefined && {paramName} !== null) {{");
-                            if (paramType == "string")
+                            if (paramType == "string" || paramType == "number" || paramType == "boolean")
                             {
-                                sb.AppendLine($"      params = params.set('{paramName}', {paramName});");
+                                sb.AppendLine($"      params = params.set('{paramName}', {paramName}.toString());");
+                            }
+                            else if (paramType.EndsWith("[]"))
+                            {
+                                sb.AppendLine($"      {paramName}.forEach(value => {{ params = params.append('{paramName}', value.toString()); }});");
                             }
                             else
                             {
-                                sb.AppendLine($"      params = params.set('{paramName}', {paramName}.toString());");
+                                sb.AppendLine($"      params = params.set('{paramName}', JSON.stringify({paramName}));");
                             }
                             sb.AppendLine("    }");
                         }
                     }
 
                     var url = "this.baseUrl";
-                    sb.AppendLine($"    return this.http.get<{returnType}>({url}, {{ headers, params }});");
+                    sb.AppendLine($"    return this.http.{httpMethod.ToLower()}<{returnType}>({url}, {{ headers, params }});");
                 }
                 else if (httpMethod == "POST" || httpMethod == "PUT")
                 {
@@ -170,17 +174,23 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             }
             else
             {
-                // Treat reference types as non-nullable
-                return false;
+                // Reference types are nullable
+                return true;
             }
         }
 
         private string GetTypeScriptTypeName(Type type, HashSet<string> modelsToImport)
         {
             if (type == null || type == typeof(void))
-                return null;
+                return "void";
 
             var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+
+            // Handle IActionResult and ActionResult types
+            if (underlyingType.Name == "IActionResult" || underlyingType.Name.StartsWith("ActionResult"))
+            {
+                return "void";
+            }
 
             if (IsBuiltInType(underlyingType))
             {
@@ -204,11 +214,18 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             if (underlyingType.IsGenericType)
             {
                 var interfaceName = GetInterfaceName(underlyingType);
-                modelsToImport.Add($"I{interfaceName}");
-                return $"I{interfaceName}";
+
+                // Add models for generic arguments
+                foreach (var arg in underlyingType.GetGenericArguments())
+                {
+                    GetTypeScriptTypeName(arg, modelsToImport);
+                }
+
+                modelsToImport.Add(interfaceName);
+                return interfaceName;
             }
 
-            var typeName = $"I{underlyingType.Name}";
+            var typeName = GetInterfaceName(underlyingType);
             modelsToImport.Add(typeName);
             return typeName;
         }
@@ -263,21 +280,28 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 
         private string GetInterfaceName(Type type)
         {
-            var interfaceName = type.Name;
+            var typeName = type.Name;
 
             if (type.IsGenericType)
             {
-                if (interfaceName.Contains('`'))
-                {
-                    interfaceName = interfaceName.Substring(0, interfaceName.IndexOf('`'));
-                }
+                var baseName = typeName.Contains('`') ? typeName.Substring(0, typeName.IndexOf('`')) : typeName;
 
                 var genericArgs = type.GetGenericArguments();
-                var genericArgNames = string.Join("", genericArgs.Select(arg => GetInterfaceName(arg)));
-                interfaceName += genericArgNames;
+                var genericArgNames = string.Join("", genericArgs.Select(arg => GetInterfaceName(arg).TrimStart('I')));
+
+                typeName = $"{baseName}{genericArgNames}";
+            }
+            else if (typeName.StartsWith("I") && typeName.Length > 1 && char.IsUpper(typeName[1]))
+            {
+                // Do not add an extra 'I'
+                return typeName;
+            }
+            else
+            {
+                typeName = $"I{typeName}";
             }
 
-            return interfaceName;
+            return typeName;
         }
 
         private string GetTypeScriptPrimitiveType(Type type)
