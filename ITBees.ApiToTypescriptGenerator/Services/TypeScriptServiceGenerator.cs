@@ -74,7 +74,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 var methodName = method.ActionName.ToLowerFirstChar();
                 var httpMethod = method.HttpMethod.ToUpper();
                 var returnType = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
-                var returnTypeString = returnType != "void" ? $"Observable<{returnType}>" : "Observable<void>";
+                var returnTypeString = returnType != "void" ? $"Observable<{returnType}>" : "Observable<any>";
 
                 var requiredParameters = new List<string>();
                 var optionalParameters = new List<string>();
@@ -101,7 +101,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 sb.AppendLine($"  {methodName}({parametersString}): {returnTypeString} {{");
                 sb.AppendLine("    const headers = this.createHeaders();");
 
-                if (httpMethod == "GET" || httpMethod == "DELETE")
+                if (httpMethod == "GET")
                 {
                     sb.AppendLine("    let params = new HttpParams();");
 
@@ -129,7 +129,47 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                     }
 
                     var url = "this.baseUrl";
-                    sb.AppendLine($"    return this.http.{httpMethod.ToLower()}<{returnType}>({url}, {{ headers, params }});");
+                    sb.AppendLine($"    return this.http.get<{returnType}>({url}, {{ headers, params }});");
+                }
+                else if (httpMethod == "DELETE")
+                {
+                    sb.AppendLine("    let params = new HttpParams();");
+
+                    foreach (var param in method.Parameters)
+                    {
+                        if (!param.FromBody)
+                        {
+                            var paramName = param.Name;
+                            var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
+                            sb.AppendLine($"    if ({paramName} !== undefined && {paramName} !== null) {{");
+                            if (paramType == "string" || paramType == "number" || paramType == "boolean")
+                            {
+                                sb.AppendLine($"      params = params.set('{paramName}', {paramName}.toString());");
+                            }
+                            else if (paramType.EndsWith("[]"))
+                            {
+                                sb.AppendLine($"      {paramName}.forEach(value => {{ params = params.append('{paramName}', value.toString()); }});");
+                            }
+                            else
+                            {
+                                sb.AppendLine($"      params = params.set('{paramName}', JSON.stringify({paramName}));");
+                            }
+                            sb.AppendLine("    }");
+                        }
+                    }
+
+                    var options = new List<string> { "headers", "params" };
+                    var bodyParam = method.Parameters.FirstOrDefault(p => p.FromBody);
+                    if (bodyParam != null)
+                    {
+                        var bodyParamName = bodyParam.Name;
+                        options.Add($"body: {bodyParamName}");
+                    }
+
+                    var optionsString = string.Join(", ", options);
+
+                    var url = "this.baseUrl";
+                    sb.AppendLine($"    return this.http.delete<{returnType}>({url}, {{ {optionsString} }});");
                 }
                 else if (httpMethod == "POST" || httpMethod == "PUT")
                 {
@@ -185,7 +225,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 
             if (underlyingType.Name == "IActionResult" || underlyingType.Name.StartsWith("ActionResult"))
             {
-                return "void";
+                return "any";
             }
 
             if (IsBuiltInType(underlyingType))
