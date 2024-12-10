@@ -14,11 +14,15 @@
   <ItemGroup>
     <PackageReference Include="ITBees.Interfaces" Version="8.0.45" />
     <PackageReference Include="ITBees.RestfulApiControllers" Version="8.0.21" />
-    <PackageReference Include="ITBeesPL.InheritedMapper" Version="8.0.15" />
   </ItemGroup>
 
   <ItemGroup>
     <Folder Include="Services\Models\" />
   </ItemGroup>
+
+<!--  <ItemGroup>-->
+<!--    <ProjectReference Include="..\..\ITBees.Interfaces\ITBees.Interfaces\ITBees.Interfaces.csproj" />-->
+<!--    <ProjectReference Include="..\..\ITBees.RestfulApiControllers\ITBees.RestfulApiControllers\ITBees.RestfulApiControllers.csproj" />-->
+<!--  </ItemGroup>-->
 
 </Project>
