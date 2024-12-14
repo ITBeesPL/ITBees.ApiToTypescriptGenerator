@@ -50,6 +50,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 {
                     foreach (var actionDescriptor in actionDescriptorCollectionProvider.ActionDescriptors.Items)
                     {
+                        Console.WriteLine($"Create typescript elements for : {actionDescriptor.DisplayName}");
                         if (actionDescriptor is ControllerActionDescriptor controllerActionDescriptor)
                         {
                             var controllerName = controllerActionDescriptor.ControllerName;
@@ -101,6 +102,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             };
                             serviceMethods.Add(serviceMethod);
                         }
+                        Console.WriteLine($"Create typescript elements for : {actionDescriptor.DisplayName} finished.");
                     }
 
                     // Write models to zip archive

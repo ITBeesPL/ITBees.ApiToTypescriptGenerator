@@ -21,7 +21,17 @@ namespace ITBees.ApiToTypescriptGenerator
 
                 if (type.Name == "FileContentResult")
                 {
-                    return null;
+                    var interfaceNameFileContentResult = "IFileContentResult";
+                    var sbFileContentResult = new StringBuilder();
+                    sbFileContentResult.AppendLine($"export interface {interfaceNameFileContentResult} {{");
+                    sbFileContentResult.AppendLine($"    fileContents: string; // Base64 encoded or any chosen representation");
+                    sbFileContentResult.AppendLine($"    contentType: string;");
+                    sbFileContentResult.AppendLine($"    fileDownloadName?: string;");
+                    sbFileContentResult.AppendLine("}");
+
+                    var typescriptModelFileResult = new TypescriptModel(sbFileContentResult.ToString(), interfaceNameFileContentResult, type);
+                    generatedModels.AddNewObject(typescriptModelFileResult);
+                    return generatedModels;
                 }
 
                 if (type.Name == "IActionResult" || type.Name.StartsWith("ActionResult"))
