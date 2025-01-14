@@ -21,149 +21,150 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         }
 
         private string GenerateService(string controllerName, List<ServiceMethod> methods)
+{
+    var sb = new StringBuilder();
+    sb.AppendLine("import { Injectable, Inject } from '@angular/core';");
+    sb.AppendLine("import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';");
+    sb.AppendLine("import { Observable } from 'rxjs';");
+    sb.AppendLine("import { API_URL } from '../models/api-url.token';");
+
+    var modelsToImport = new HashSet<string>();
+    foreach (var method in methods)
+    {
+        var returnTypeName = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
+        foreach (var param in method.Parameters)
         {
-            var sb = new StringBuilder();
-            sb.AppendLine("import { Injectable, Inject } from '@angular/core';");
-            sb.AppendLine("import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';");
-            sb.AppendLine("import { Observable } from 'rxjs';");
-            sb.AppendLine("import { API_URL } from '../models/api-url.token';");
-            var modelsToImport = new HashSet<string>();
+            var paramTypeName = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
+        }
+    }
+    foreach (var model in modelsToImport)
+    {
+        var modelNameWithoutI = model.StartsWith("I") && char.IsUpper(model[1]) ? model.Substring(1) : model;
+        var fileName = ToKebabCase(modelNameWithoutI);
+        sb.AppendLine($"import {{ {model} }} from '../{fileName}.model';");
+    }
 
-            foreach (var method in methods)
+    sb.AppendLine("@Injectable({ providedIn: 'root' })");
+    sb.AppendLine($"export class {controllerName}Service {{");
+    sb.AppendLine("  private readonly baseUrl: string;");
+    sb.AppendLine("  constructor(private http: HttpClient, @Inject(API_URL) private apiUrl: string) {");
+    sb.AppendLine("    this.baseUrl = `${this.apiUrl}/" + controllerName + "`;");
+    sb.AppendLine("  }");
+
+    foreach (var method in methods)
+    {
+        var httpMethod = method.HttpMethod.ToUpper();
+        var methodName = httpMethod.ToLower();
+        var returnType = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
+        var returnTypeString = returnType != "void" ? $"Observable<{returnType}>" : "Observable<any>";
+        var requiredParameters = new List<string>();
+        var optionalParameters = new List<string>();
+
+        foreach (var param in method.Parameters)
+        {
+            var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
+            var isOptional = IsNullableType(param.ParameterInfo);
+            var optionalSign = isOptional ? "?" : "";
+            var parameterDeclaration = $"{param.Name}{optionalSign}: {paramType}";
+            if (isOptional) optionalParameters.Add(parameterDeclaration);
+            else requiredParameters.Add(parameterDeclaration);
+        }
+
+        var parametersString = string.Join(", ", requiredParameters.Concat(optionalParameters));
+        sb.AppendLine($"  {methodName}({parametersString}): {returnTypeString} {{");
+        sb.AppendLine("    const headers = this.createHeaders();");
+
+        if (httpMethod == "GET")
+        {
+            sb.AppendLine("    let params = new HttpParams();");
+            foreach (var param in method.Parameters)
             {
-                var returnTypeName = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
-                foreach (var param in method.Parameters)
+                if (!param.FromBody)
                 {
-                    var paramTypeName = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
-                }
-            }
-            foreach (var model in modelsToImport)
-            {
-                var modelNameWithoutI = model.StartsWith("I") && char.IsUpper(model[1]) ? model.Substring(1) : model;
-                var fileName = ToKebabCase(modelNameWithoutI);
-                sb.AppendLine($"import {{ {model} }} from '../{fileName}.model';");
-            }
-
-            sb.AppendLine("@Injectable({ providedIn: 'root' })");
-            sb.AppendLine($"export class {controllerName}Service {{");
-            sb.AppendLine("  private readonly baseUrl: string;");
-            sb.AppendLine("  constructor(private http: HttpClient, @Inject(API_URL) private apiUrl: string) {");
-            sb.AppendLine("    this.baseUrl = `${this.apiUrl}/${controllerName}`;");
-            sb.AppendLine("  }");
-
-            foreach (var method in methods)
-            {
-                var httpMethod = method.HttpMethod.ToUpper();
-                var methodName = httpMethod.ToLower();
-                var returnType = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
-                var returnTypeString = returnType != "void" ? $"Observable<{returnType}>" : "Observable<any>";
-                var requiredParameters = new List<string>();
-                var optionalParameters = new List<string>();
-
-                foreach (var param in method.Parameters)
-                {
+                    var paramName = param.Name;
                     var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
-                    var isOptional = IsNullableType(param.ParameterInfo);
-                    var optionalSign = isOptional ? "?" : "";
-                    var parameterDeclaration = $"{param.Name}{optionalSign}: {paramType}";
-                    if (isOptional) optionalParameters.Add(parameterDeclaration);
-                    else requiredParameters.Add(parameterDeclaration);
-                }
-
-                var parametersString = string.Join(", ", requiredParameters.Concat(optionalParameters));
-                sb.AppendLine($"  {methodName}({parametersString}): {returnTypeString} {{");
-                sb.AppendLine("    const headers = this.createHeaders();");
-
-                if (httpMethod == "GET")
-                {
-                    sb.AppendLine("    let params = new HttpParams();");
-                    foreach (var param in method.Parameters)
+                    sb.AppendLine($"    if ({paramName} !== undefined && {paramName} !== null) {{");
+                    if (paramType == "string" || paramType == "number" || paramType == "boolean")
                     {
-                        if (!param.FromBody)
-                        {
-                            var paramName = param.Name;
-                            var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
-                            sb.AppendLine($"    if ({paramName} !== undefined && {paramName} !== null) {{");
-                            if (paramType == "string" || paramType == "number" || paramType == "boolean")
-                            {
-                                sb.AppendLine($"      params = params.set('{paramName}', {paramName}.toString());");
-                            }
-                            else if (paramType.EndsWith("[]"))
-                            {
-                                sb.AppendLine($"      {paramName}.forEach(value => {{ params = params.append('{paramName}', value.toString()); }});");
-                            }
-                            else
-                            {
-                                sb.AppendLine($"      params = params.set('{paramName}', JSON.stringify({paramName}));");
-                            }
-                            sb.AppendLine("    }");
-                        }
+                        sb.AppendLine($"      params = params.set('{paramName}', {paramName}.toString());");
                     }
-                    sb.AppendLine($"    return this.http.get<{returnType}>(this.baseUrl, {{ headers, params }});");
-                }
-                else if (httpMethod == "DELETE")
-                {
-                    sb.AppendLine("    let params = new HttpParams();");
-                    foreach (var param in method.Parameters)
+                    else if (paramType.EndsWith("[]"))
                     {
-                        if (!param.FromBody)
-                        {
-                            var paramName = param.Name;
-                            var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
-                            sb.AppendLine($"    if ({paramName} !== undefined && {paramName} !== null) {{");
-                            if (paramType == "string" || paramType == "number" || paramType == "boolean")
-                            {
-                                sb.AppendLine($"      params = params.set('{paramName}', {paramName}.toString());");
-                            }
-                            else if (paramType.EndsWith("[]"))
-                            {
-                                sb.AppendLine($"      {paramName}.forEach(value => {{ params = params.append('{paramName}', value.toString()); }});");
-                            }
-                            else
-                            {
-                                sb.AppendLine($"      params = params.set('{paramName}', JSON.stringify({paramName}));");
-                            }
-                            sb.AppendLine("    }");
-                        }
-                    }
-                    var options = new List<string> { "headers", "params" };
-                    var bodyParam = method.Parameters.FirstOrDefault(p => p.FromBody);
-                    if (bodyParam != null)
-                    {
-                        var bodyParamName = bodyParam.Name;
-                        options.Add($"body: {bodyParamName}");
-                    }
-                    var optionsString = string.Join(", ", options);
-                    sb.AppendLine($"    return this.http.delete<{returnType}>(this.baseUrl, {{ {optionsString} }});");
-                }
-                else if (httpMethod == "POST" || httpMethod == "PUT")
-                {
-                    var bodyParam = method.Parameters.FirstOrDefault(p => p.FromBody);
-                    if (bodyParam != null)
-                    {
-                        var bodyParamName = bodyParam.Name;
-                        sb.AppendLine($"    return this.http.{httpMethod.ToLower()}<{returnType}>(this.baseUrl, {bodyParamName}, {{ headers }});");
+                        sb.AppendLine($"      {paramName}.forEach(value => {{ params = params.append('{paramName}', value.toString()); }});");
                     }
                     else
                     {
-                        sb.AppendLine($"    return this.http.{httpMethod.ToLower()}<{returnType}>(this.baseUrl, null, {{ headers }});");
+                        sb.AppendLine($"      params = params.set('{paramName}', JSON.stringify({paramName}));");
                     }
+                    sb.AppendLine("    }");
                 }
-
-                sb.AppendLine("  }");
             }
-
-            sb.AppendLine("  private createHeaders(): HttpHeaders {");
-            sb.AppendLine("    let headers = new HttpHeaders();");
-            sb.AppendLine("    const token = localStorage.getItem('authToken');");
-            sb.AppendLine("    if (token) {");
-            sb.AppendLine("      headers = headers.set('Authorization', `Bearer ${token}`);");
-            sb.AppendLine("    }");
-            sb.AppendLine("    return headers;");
-            sb.AppendLine("  }");
-            sb.AppendLine("}");
-            return sb.ToString();
+            sb.AppendLine($"    return this.http.get<{returnType}>(this.baseUrl, {{ headers, params }});");
         }
+        else if (httpMethod == "DELETE")
+        {
+            sb.AppendLine("    let params = new HttpParams();");
+            foreach (var param in method.Parameters)
+            {
+                if (!param.FromBody)
+                {
+                    var paramName = param.Name;
+                    var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
+                    sb.AppendLine($"    if ({paramName} !== undefined && {paramName} !== null) {{");
+                    if (paramType == "string" || paramType == "number" || paramType == "boolean")
+                    {
+                        sb.AppendLine($"      params = params.set('{paramName}', {paramName}.toString());");
+                    }
+                    else if (paramType.EndsWith("[]"))
+                    {
+                        sb.AppendLine($"      {paramName}.forEach(value => {{ params = params.append('{paramName}', value.toString()); }});");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"      params = params.set('{paramName}', JSON.stringify({paramName}));");
+                    }
+                    sb.AppendLine("    }");
+                }
+            }
+            var options = new List<string> { "headers", "params" };
+            var bodyParam = method.Parameters.FirstOrDefault(p => p.FromBody);
+            if (bodyParam != null)
+            {
+                var bodyParamName = bodyParam.Name;
+                options.Add($"body: {bodyParamName}");
+            }
+            var optionsString = string.Join(", ", options);
+            sb.AppendLine($"    return this.http.delete<{returnType}>(this.baseUrl, {{ {optionsString} }});");
+        }
+        else if (httpMethod == "POST" || httpMethod == "PUT")
+        {
+            var bodyParam = method.Parameters.FirstOrDefault(p => p.FromBody);
+            if (bodyParam != null)
+            {
+                var bodyParamName = bodyParam.Name;
+                sb.AppendLine($"    return this.http.{httpMethod.ToLower()}<{returnType}>(this.baseUrl, {bodyParamName}, {{ headers }});");
+            }
+            else
+            {
+                sb.AppendLine($"    return this.http.{httpMethod.ToLower()}<{returnType}>(this.baseUrl, null, {{ headers }});");
+            }
+        }
+
+        sb.AppendLine("  }");
+    }
+
+    sb.AppendLine("  private createHeaders(): HttpHeaders {");
+    sb.AppendLine("    let headers = new HttpHeaders();");
+    sb.AppendLine("    const token = localStorage.getItem('authToken');");
+    sb.AppendLine("    if (token) {");
+    sb.AppendLine("      headers = headers.set('Authorization', `Bearer ${token}`);");
+    sb.AppendLine("    }");
+    sb.AppendLine("    return headers;");
+    sb.AppendLine("  }");
+    sb.AppendLine("}");
+    return sb.ToString();
+}
+
 
         private bool IsNullableType(ParameterInfo parameter)
         {
