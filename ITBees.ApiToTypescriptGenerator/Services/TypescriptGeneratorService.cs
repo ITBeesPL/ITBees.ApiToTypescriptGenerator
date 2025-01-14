@@ -84,12 +84,10 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                     ParameterInfo = parameterInfo
                                 });
 
-                                // Generate models for parameter types, including generic arguments
                                 GenerateModelsForType(parameterType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
                             }
 
                             var returnType = GetActionReturnType(methodInfo);
-                            // Generate models for return types, including generic arguments
                             GenerateModelsForType(returnType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
 
                             var serviceMethod = new ServiceMethod
@@ -105,28 +103,37 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                         Console.WriteLine($"Create typescript elements for : {actionDescriptor.DisplayName} finished.");
                     }
 
-                    // Write models to zip archive
                     foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
                     {
                         AddEntryToZipArchive(zipArchive, generatedTypescriptModel.FileName, generatedTypescriptModel.FileContent);
                     }
 
-                    // Generate the services
                     var serviceGenerator = new TypeScriptServiceGenerator();
                     generatedServices = serviceGenerator.GenerateServices(serviceMethods);
 
-                    // Write the generated services to the zip file
                     foreach (var service in generatedServices)
                     {
                         var serviceFileName = $"api-services/{ToKebabCase(service.Key)}.service.ts";
                         AddEntryToZipArchive(zipArchive, serviceFileName, service.Value);
                     }
+
+                    var apiUrlTokenFileContent = 
+@"import { InjectionToken } from '@angular/core';
+
+export const API_URL = new InjectionToken<string>('API_URL');
+";
+
+                    AddEntryToZipArchive(zipArchive, "models/api-url.token.ts", apiUrlTokenFileContent);
                 }
 
                 zipBytes = zipMemoryStream.ToArray();
             }
 
-            return new AllTypescriptModels(sb.ToString(), zipBytes, generatedModelTypes.Select(t => t.Name).ToList(), generatedServices);
+            return new AllTypescriptModels(
+                sb.ToString(),
+                zipBytes,
+                generatedModelTypes.Select(t => t.Name).ToList(),
+                generatedServices);
         }
 
         private string GetHttpMethod(ControllerActionDescriptor actionDescriptor)
@@ -169,7 +176,11 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return returnType;
         }
 
-        private void GenerateModelsForType(Type type, TypeScriptGenerator typeScriptGenerator, Dictionary<string, TypeScriptFile> generatedTypescriptModels, HashSet<Type> generatedModelTypes)
+        private void GenerateModelsForType(
+            Type type,
+            TypeScriptGenerator typeScriptGenerator,
+            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
+            HashSet<Type> generatedModelTypes)
         {
             if (type == null || IsBuiltInType(type) || generatedModelTypes.Contains(type))
             {
@@ -223,7 +234,10 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             return typeof(object);
         }
 
-        private void AddGeneratedModels(TypeScriptGeneratedModels typeScriptGeneratedModels, Dictionary<string, TypeScriptFile> generatedTypescriptModels, HashSet<Type> generatedModelTypes)
+        private void AddGeneratedModels(
+            TypeScriptGeneratedModels typeScriptGeneratedModels,
+            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
+            HashSet<Type> generatedModelTypes)
         {
             foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
             {
