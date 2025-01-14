@@ -160,7 +160,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             }
             sb.AppendLine("  private createHeaders(): HttpHeaders {");
             sb.AppendLine("    let headers = new HttpHeaders();");
-            sb.AppendLine("    const token = localStorage.getItem('token');");
+            sb.AppendLine("    const token = localStorage.getItem('authToken');");
             sb.AppendLine("    if (token) {");
             sb.AppendLine("      headers = headers.set('Authorization', `Bearer ${token}`);");
             sb.AppendLine("    }");
