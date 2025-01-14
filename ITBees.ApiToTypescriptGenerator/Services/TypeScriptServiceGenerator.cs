@@ -10,7 +10,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         {
             var services = new Dictionary<string, string>();
             var groupedByController = serviceMethods.GroupBy(sm => sm.ControllerName);
-
             foreach (var controllerGroup in groupedByController)
             {
                 var controllerName = controllerGroup.Key;
@@ -24,15 +23,10 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         private string GenerateService(string controllerName, List<ServiceMethod> methods)
         {
             var sb = new StringBuilder();
-            
             sb.AppendLine("import { Injectable, Inject } from '@angular/core';");
             sb.AppendLine("import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';");
             sb.AppendLine("import { Observable } from 'rxjs';");
-            
-            // sb.AppendLine("import { environment } from '../../app/environments/environments';");
-            
             sb.AppendLine("import { API_URL } from '../models/api-url.token';");
-
             var modelsToImport = new HashSet<string>();
 
             foreach (var method in methods)
@@ -50,31 +44,19 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 sb.AppendLine($"import {{ {model} }} from '../{fileName}.model';");
             }
 
-            sb.AppendLine();
-            sb.AppendLine("@Injectable({");
-            sb.AppendLine("  providedIn: 'root'");
-            sb.AppendLine("})");
+            sb.AppendLine("@Injectable({ providedIn: 'root' })");
             sb.AppendLine($"export class {controllerName}Service {{");
-
             sb.AppendLine("  private readonly baseUrl: string;");
-            sb.AppendLine();
-            sb.AppendLine("  constructor(");
-            sb.AppendLine("    private http: HttpClient,");
-            sb.AppendLine("    @Inject(API_URL) private apiUrl: string");
-            sb.AppendLine("  ) {");
-            // Zamiast /QuestionBase możesz wstawić dowolny segment, w zależności od wymagań
-            sb.AppendLine("    this.baseUrl = `${this.apiUrl}/QuestionBase`;");
+            sb.AppendLine("  constructor(private http: HttpClient, @Inject(API_URL) private apiUrl: string) {");
+            sb.AppendLine("    this.baseUrl = `${this.apiUrl}/${controllerName}`;");
             sb.AppendLine("  }");
-            sb.AppendLine();
 
-            // Tworzymy metody (GET, POST, PUT, DELETE)
             foreach (var method in methods)
             {
                 var httpMethod = method.HttpMethod.ToUpper();
                 var methodName = httpMethod.ToLower();
                 var returnType = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
                 var returnTypeString = returnType != "void" ? $"Observable<{returnType}>" : "Observable<any>";
-
                 var requiredParameters = new List<string>();
                 var optionalParameters = new List<string>();
 
@@ -84,7 +66,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                     var isOptional = IsNullableType(param.ParameterInfo);
                     var optionalSign = isOptional ? "?" : "";
                     var parameterDeclaration = $"{param.Name}{optionalSign}: {paramType}";
-
                     if (isOptional) optionalParameters.Add(parameterDeclaration);
                     else requiredParameters.Add(parameterDeclaration);
                 }
@@ -170,7 +151,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 }
 
                 sb.AppendLine("  }");
-                sb.AppendLine();
             }
 
             sb.AppendLine("  private createHeaders(): HttpHeaders {");
@@ -182,7 +162,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             sb.AppendLine("    return headers;");
             sb.AppendLine("  }");
             sb.AppendLine("}");
-
             return sb.ToString();
         }
 
@@ -202,28 +181,23 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         {
             if (type == null || type == typeof(void))
                 return "void";
-
             var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
             if (underlyingType.Name == "IActionResult" || underlyingType.Name.StartsWith("ActionResult"))
                 return "any";
-
             if (IsBuiltInType(underlyingType))
                 return GetTypeScriptPrimitiveType(underlyingType);
-
             if (underlyingType.IsEnum)
             {
                 var enumName = underlyingType.Name;
                 modelsToImport.Add(enumName);
                 return enumName;
             }
-
             if (IsCollectionType(underlyingType))
             {
                 var itemType = GetCollectionItemType(underlyingType);
                 var tsItemType = GetTypeScriptTypeName(itemType, modelsToImport);
                 return $"{tsItemType}[]";
             }
-
             if (underlyingType.IsGenericType)
             {
                 var interfaceName = GetInterfaceName(underlyingType);
@@ -234,7 +208,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 modelsToImport.Add(interfaceName);
                 return interfaceName;
             }
-
             var typeName = GetInterfaceName(underlyingType);
             modelsToImport.Add(typeName);
             return typeName;
@@ -267,10 +240,8 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         {
             if (type.IsArray)
                 return type.GetElementType();
-
             if (type.IsGenericType)
                 return type.GetGenericArguments().FirstOrDefault() ?? typeof(object);
-
             return typeof(object);
         }
 
@@ -279,15 +250,11 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             var typeName = type.Name;
             if (type.IsGenericType)
             {
-                var baseName = typeName.Contains("`")
-                    ? typeName.Substring(0, typeName.IndexOf('`'))
-                    : typeName;
-
+                var baseName = typeName.Contains("`") ? typeName.Substring(0, typeName.IndexOf('`')) : typeName;
                 if (baseName.StartsWith("I") && baseName.Length > 1 && char.IsUpper(baseName[1]))
                 {
                     baseName = baseName.Substring(1);
                 }
-
                 var genericArgs = type.GetGenericArguments();
                 var genericArgNames = string.Join("", genericArgs.Select(arg =>
                 {
@@ -298,7 +265,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                     }
                     return argName;
                 }));
-
                 typeName = $"I{baseName}{genericArgNames}";
             }
             else
@@ -314,23 +280,15 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         private string GetTypeScriptPrimitiveType(Type type)
         {
             var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
-
             if (underlyingType == typeof(string) || underlyingType == typeof(Guid))
                 return "string";
-
-            if (underlyingType == typeof(int) || underlyingType == typeof(long) ||
-                underlyingType == typeof(short) || underlyingType == typeof(decimal) ||
-                underlyingType == typeof(float) || underlyingType == typeof(double))
-            {
+            if (underlyingType == typeof(int) || underlyingType == typeof(long) || underlyingType == typeof(short)
+                || underlyingType == typeof(decimal) || underlyingType == typeof(float) || underlyingType == typeof(double))
                 return "number";
-            }
-
             if (underlyingType == typeof(bool))
                 return "boolean";
-
             if (underlyingType == typeof(DateTime))
                 return "Date";
-
             return "any";
         }
 
@@ -338,10 +296,8 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         {
             if (string.IsNullOrEmpty(input))
                 return input;
-
             var sb = new StringBuilder();
             sb.Append(char.ToLowerInvariant(input[0]));
-
             for (int i = 1; i < input.Length; i++)
             {
                 var c = input[i];

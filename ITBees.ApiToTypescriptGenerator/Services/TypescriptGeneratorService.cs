@@ -32,15 +32,12 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             var partManager = _serviceProvider.GetRequiredService<ApplicationPartManager>();
             var feature = new ControllerFeature();
             partManager.PopulateFeature(feature);
-
             var actionDescriptorCollectionProvider = _serviceProvider.GetRequiredService<IActionDescriptorCollectionProvider>();
             var sb = new StringBuilder();
             var typeScriptGenerator = new TypeScriptGenerator();
-
             var generatedTypescriptModels = new Dictionary<string, TypeScriptFile>();
             var generatedModelTypes = new HashSet<Type>();
             var serviceMethods = new List<ServiceMethod>();
-
             byte[] zipBytes;
             Dictionary<string, string> generatedServices = null;
 
@@ -50,19 +47,14 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 {
                     foreach (var actionDescriptor in actionDescriptorCollectionProvider.ActionDescriptors.Items)
                     {
-                        Console.WriteLine($"Create typescript elements for : {actionDescriptor.DisplayName}");
                         if (actionDescriptor is ControllerActionDescriptor controllerActionDescriptor)
                         {
                             var controllerName = controllerActionDescriptor.ControllerName;
                             var actionName = controllerActionDescriptor.ActionName;
                             var methodInfo = controllerActionDescriptor.MethodInfo;
-
-                            sb.AppendLine($"[Controller /{controllerName}]");
-                            sb.AppendLine($"Action: {actionName}");
-
                             var httpMethod = GetHttpMethod(controllerActionDescriptor);
-
                             var parameters = new List<ServiceParameter>();
+
                             foreach (var parameter in controllerActionDescriptor.Parameters)
                             {
                                 var parameterType = parameter.ParameterType;
@@ -70,7 +62,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                 var fromBody = bindingSource == BindingSource.Body;
                                 var fromQuery = bindingSource == BindingSource.Query;
                                 var fromRoute = bindingSource == BindingSource.Path || bindingSource == BindingSource.ModelBinding;
-
                                 var controllerParameterDescriptor = parameter as ControllerParameterDescriptor;
                                 var parameterInfo = controllerParameterDescriptor?.ParameterInfo;
 
@@ -100,7 +91,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             };
                             serviceMethods.Add(serviceMethod);
                         }
-                        Console.WriteLine($"Create typescript elements for : {actionDescriptor.DisplayName} finished.");
                     }
 
                     foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
@@ -117,12 +107,11 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                         AddEntryToZipArchive(zipArchive, serviceFileName, service.Value);
                     }
 
-                    var apiUrlTokenFileContent = 
+                    var apiUrlTokenFileContent =
 @"import { InjectionToken } from '@angular/core';
 
 export const API_URL = new InjectionToken<string>('API_URL');
 ";
-
                     AddEntryToZipArchive(zipArchive, "models/api-url.token.ts", apiUrlTokenFileContent);
                 }
 
@@ -139,59 +128,42 @@ export const API_URL = new InjectionToken<string>('API_URL');
         private string GetHttpMethod(ControllerActionDescriptor actionDescriptor)
         {
             var method = "GET";
-
-            var httpMethodAttributes = actionDescriptor.MethodInfo.GetCustomAttributes()
-                .OfType<HttpMethodAttribute>();
-
+            var httpMethodAttributes = actionDescriptor.MethodInfo.GetCustomAttributes().OfType<HttpMethodAttribute>();
             if (httpMethodAttributes.Any())
             {
                 method = httpMethodAttributes.First().HttpMethods.First();
             }
-
             return method;
         }
 
         private Type GetActionReturnType(MethodInfo methodInfo)
         {
             var returnType = methodInfo.ReturnType;
-
             if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
             {
                 returnType = returnType.GetGenericArguments()[0];
             }
-
             if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(ActionResult<>))
             {
                 returnType = returnType.GetGenericArguments()[0];
             }
-
-            var producesAttribute = methodInfo.GetCustomAttributes()
-                .FirstOrDefault(attr => attr.GetType().Name.StartsWith("Produces")) as dynamic;
-
+            var producesAttribute = methodInfo.GetCustomAttributes().FirstOrDefault(attr => attr.GetType().Name.StartsWith("Produces")) as dynamic;
             if (producesAttribute != null && producesAttribute.Type != null)
             {
                 returnType = producesAttribute.Type;
             }
-
             return returnType;
         }
 
-        private void GenerateModelsForType(
-            Type type,
-            TypeScriptGenerator typeScriptGenerator,
-            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
-            HashSet<Type> generatedModelTypes)
+        private void GenerateModelsForType(Type type, TypeScriptGenerator typeScriptGenerator, Dictionary<string, TypeScriptFile> generatedTypescriptModels, HashSet<Type> generatedModelTypes)
         {
             if (type == null || IsBuiltInType(type) || generatedModelTypes.Contains(type))
             {
                 return;
             }
-
             generatedModelTypes.Add(type);
-
             var typeScriptGeneratedModels = typeScriptGenerator.Generate(type, new TypeScriptGeneratedModels(), true);
             AddGeneratedModels(typeScriptGeneratedModels, generatedTypescriptModels, generatedModelTypes);
-
             if (type.IsGenericType)
             {
                 foreach (var arg in type.GetGenericArguments())
@@ -234,17 +206,11 @@ export const API_URL = new InjectionToken<string>('API_URL');
             return typeof(object);
         }
 
-        private void AddGeneratedModels(
-            TypeScriptGeneratedModels typeScriptGeneratedModels,
-            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
-            HashSet<Type> generatedModelTypes)
+        private void AddGeneratedModels(TypeScriptGeneratedModels typeScriptGeneratedModels, Dictionary<string, TypeScriptFile> generatedTypescriptModels, HashSet<Type> generatedModelTypes)
         {
             foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
             {
-                var typeScriptGeneratedModel = new TypeScriptFile(
-                    typescriptModel.Model,
-                    typescriptModel.TypeName);
-
+                var typeScriptGeneratedModel = new TypeScriptFile(typescriptModel.Model, typescriptModel.TypeName);
                 if (!generatedTypescriptModels.ContainsKey(typeScriptGeneratedModel.TypeName))
                 {
                     generatedTypescriptModels.Add(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
@@ -270,7 +236,6 @@ export const API_URL = new InjectionToken<string>('API_URL');
         {
             if (string.IsNullOrEmpty(input))
                 return input;
-
             var sb = new StringBuilder();
             sb.Append(char.ToLowerInvariant(input[0]));
             for (int i = 1; i < input.Length; i++)
