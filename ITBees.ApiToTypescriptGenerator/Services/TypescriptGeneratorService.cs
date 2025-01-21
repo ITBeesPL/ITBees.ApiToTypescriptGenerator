@@ -32,12 +32,15 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             var partManager = _serviceProvider.GetRequiredService<ApplicationPartManager>();
             var feature = new ControllerFeature();
             partManager.PopulateFeature(feature);
+
             var actionDescriptorCollectionProvider = _serviceProvider.GetRequiredService<IActionDescriptorCollectionProvider>();
             var sb = new StringBuilder();
             var typeScriptGenerator = new TypeScriptGenerator();
+
             var generatedTypescriptModels = new Dictionary<string, TypeScriptFile>();
             var generatedModelTypes = new HashSet<Type>();
             var serviceMethods = new List<ServiceMethod>();
+
             byte[] zipBytes;
             Dictionary<string, string> generatedServices = null;
 
@@ -50,11 +53,10 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                         if (actionDescriptor is ControllerActionDescriptor controllerActionDescriptor)
                         {
                             var controllerName = controllerActionDescriptor.ControllerName;
-                            var actionName = controllerActionDescriptor.ActionName;
                             var methodInfo = controllerActionDescriptor.MethodInfo;
                             var httpMethod = GetHttpMethod(controllerActionDescriptor);
-                            var parameters = new List<ServiceParameter>();
 
+                            var parameters = new List<ServiceParameter>();
                             foreach (var parameter in controllerActionDescriptor.Parameters)
                             {
                                 var parameterType = parameter.ParameterType;
@@ -81,15 +83,14 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             var returnType = GetActionReturnType(methodInfo);
                             GenerateModelsForType(returnType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
 
-                            var serviceMethod = new ServiceMethod
+                            serviceMethods.Add(new ServiceMethod
                             {
                                 ControllerName = controllerName,
-                                ActionName = actionName,
+                                ActionName = controllerActionDescriptor.ActionName,
                                 HttpMethod = httpMethod,
                                 Parameters = parameters,
                                 ReturnType = returnType
-                            };
-                            serviceMethods.Add(serviceMethod);
+                            });
                         }
                     }
 
@@ -121,14 +122,18 @@ export const API_URL = new InjectionToken<string>('API_URL');
             return new AllTypescriptModels(
                 sb.ToString(),
                 zipBytes,
-                generatedModelTypes.Select(t => t.Name).ToList(),
-                generatedServices);
+                generatedModelTypes.Select(x => x.Name).ToList(),
+                generatedServices
+            );
         }
 
         private string GetHttpMethod(ControllerActionDescriptor actionDescriptor)
         {
             var method = "GET";
-            var httpMethodAttributes = actionDescriptor.MethodInfo.GetCustomAttributes().OfType<HttpMethodAttribute>();
+            var httpMethodAttributes = actionDescriptor.MethodInfo
+                .GetCustomAttributes()
+                .OfType<HttpMethodAttribute>();
+
             if (httpMethodAttributes.Any())
             {
                 method = httpMethodAttributes.First().HttpMethods.First();
@@ -147,7 +152,10 @@ export const API_URL = new InjectionToken<string>('API_URL');
             {
                 returnType = returnType.GetGenericArguments()[0];
             }
-            var producesAttribute = methodInfo.GetCustomAttributes().FirstOrDefault(attr => attr.GetType().Name.StartsWith("Produces")) as dynamic;
+            var producesAttribute = methodInfo
+                .GetCustomAttributes()
+                .FirstOrDefault(x => x.GetType().Name.StartsWith("Produces")) as dynamic;
+
             if (producesAttribute != null && producesAttribute.Type != null)
             {
                 returnType = producesAttribute.Type;
@@ -155,15 +163,21 @@ export const API_URL = new InjectionToken<string>('API_URL');
             return returnType;
         }
 
-        private void GenerateModelsForType(Type type, TypeScriptGenerator typeScriptGenerator, Dictionary<string, TypeScriptFile> generatedTypescriptModels, HashSet<Type> generatedModelTypes)
+        private void GenerateModelsForType(
+            Type type,
+            TypeScriptGenerator typeScriptGenerator,
+            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
+            HashSet<Type> generatedModelTypes)
         {
             if (type == null || IsBuiltInType(type) || generatedModelTypes.Contains(type))
             {
                 return;
             }
             generatedModelTypes.Add(type);
-            var typeScriptGeneratedModels = typeScriptGenerator.Generate(type, new TypeScriptGeneratedModels(), true);
+
+            var typeScriptGeneratedModels = typeScriptGenerator.Generate(type, new TypeScriptGeneratedModels(), false);
             AddGeneratedModels(typeScriptGeneratedModels, generatedTypescriptModels, generatedModelTypes);
+
             if (type.IsGenericType)
             {
                 foreach (var arg in type.GetGenericArguments())
@@ -180,12 +194,12 @@ export const API_URL = new InjectionToken<string>('API_URL');
 
         private bool IsBuiltInType(Type type)
         {
-            var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
-            return underlyingType.IsPrimitive
-                || underlyingType == typeof(string)
-                || underlyingType == typeof(decimal)
-                || underlyingType == typeof(DateTime)
-                || underlyingType == typeof(Guid);
+            var t = Nullable.GetUnderlyingType(type) ?? type;
+            return t.IsPrimitive
+                || t == typeof(string)
+                || t == typeof(decimal)
+                || t == typeof(DateTime)
+                || t == typeof(Guid);
         }
 
         private bool IsCollectionType(Type type)
@@ -206,17 +220,48 @@ export const API_URL = new InjectionToken<string>('API_URL');
             return typeof(object);
         }
 
-        private void AddGeneratedModels(TypeScriptGeneratedModels typeScriptGeneratedModels, Dictionary<string, TypeScriptFile> generatedTypescriptModels, HashSet<Type> generatedModelTypes)
+        private void AddGeneratedModels(
+            TypeScriptGeneratedModels typeScriptGeneratedModels,
+            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
+            HashSet<Type> generatedModelTypes)
         {
-            foreach (var typescriptModel in typeScriptGeneratedModels.GeneratedModels)
+            foreach (var tsModel in typeScriptGeneratedModels.GeneratedModels)
             {
-                var typeScriptGeneratedModel = new TypeScriptFile(typescriptModel.Model, typescriptModel.TypeName);
-                if (!generatedTypescriptModels.ContainsKey(typeScriptGeneratedModel.TypeName))
+                var originalType = tsModel.OriginalType;
+                var fixedModel = tsModel.Model;
+
+                // Fallback: usuń wszystkie "?: string" → ": string"
+                fixedModel = fixedModel.Replace("?: string", ": string");
+
+                if (originalType != null)
                 {
-                    generatedTypescriptModels.Add(typeScriptGeneratedModel.TypeName, typeScriptGeneratedModel);
-                    if (typescriptModel.OriginalType != null)
+                    var props = originalType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+                    foreach (var p in props)
                     {
-                        generatedModelTypes.Add(typescriptModel.OriginalType);
+                        // Wygenerowana nazwa w TS może być z małej litery
+                        // np. "SecretKey" -> "secretKey"
+                        // budujemy pattern do zamiany
+                        var tsPropName = ToCamelCase(p.Name) + ": string";
+
+                        // Jeśli atrybut [NullabelParameter] jest obecny, wymuszamy "?: string"
+                        var hasNullabelParameter = p.GetCustomAttributes()
+                            .Any(a => a.GetType().Name == "NullabelParameterAttribute");
+                        if (hasNullabelParameter)
+                        {
+                            var find = tsPropName;
+                            var repl = ToCamelCase(p.Name) + "?: string";
+                            fixedModel = fixedModel.Replace(find, repl);
+                        }
+                    }
+                }
+
+                var file = new TypeScriptFile(fixedModel, tsModel.TypeName);
+                if (!generatedTypescriptModels.ContainsKey(file.TypeName))
+                {
+                    generatedTypescriptModels.Add(file.TypeName, file);
+                    if (tsModel.OriginalType != null)
+                    {
+                        generatedModelTypes.Add(tsModel.OriginalType);
                     }
                 }
             }
@@ -235,7 +280,9 @@ export const API_URL = new InjectionToken<string>('API_URL');
         private string ToKebabCase(string input)
         {
             if (string.IsNullOrEmpty(input))
+            {
                 return input;
+            }
             var sb = new StringBuilder();
             sb.Append(char.ToLowerInvariant(input[0]));
             for (int i = 1; i < input.Length; i++)
@@ -252,6 +299,16 @@ export const API_URL = new InjectionToken<string>('API_URL');
                 }
             }
             return sb.ToString();
+        }
+
+        // Dodatkowa metoda do konwersji nazwy właściwości na camelCase
+        private string ToCamelCase(string csharpPropertyName)
+        {
+            if (string.IsNullOrEmpty(csharpPropertyName))
+                return csharpPropertyName;
+            if (csharpPropertyName.Length == 1)
+                return csharpPropertyName.ToLower();
+            return char.ToLowerInvariant(csharpPropertyName[0]) + csharpPropertyName.Substring(1);
         }
     }
 }
