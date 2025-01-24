@@ -230,41 +230,39 @@ export const API_URL = new InjectionToken<string>('API_URL');
         var originalType = tsModel.OriginalType;
         var fixedModel = tsModel.Model;
 
-        // Najpierw fallback: usuń wszystkie '?: string' -> ': string'
+        // Usuwamy wszystko "?: string" -> ": string" (fallback)
         fixedModel = fixedModel.Replace("?: string", ": string");
 
         if (originalType != null)
         {
-            // Pobieramy publiczne properties z oryginalnego typu
             var props = originalType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
 
             foreach (var p in props)
             {
-                // W TypeScripcie nazwy mogą być camelCase
                 var tsPropName = ToCamelCase(p.Name) + ": string";
 
-                // Atrybuty
-                var hasNullabelParameter = p.GetCustomAttributes()
-                    .Any(a => a.GetType().Name == "NullabelParameterAttribute");
+                // Sprawdzamy nazwy atrybutów
+                var hasNullableStringProperty = p.GetCustomAttributes()
+                    .Any(a => a.GetType().Name == "NullableStringPropertyAttribute");
 
                 var hasNullableGuidProperty = p.GetCustomAttributes()
                     .Any(a => a.GetType().Name == "NullableGuidPropertyAttribute");
 
-                // Dla string?
-                if (hasNullabelParameter && p.PropertyType == typeof(string))
+                // Jeśli to string? i ma [NullableStringProperty]
+                if (hasNullableStringProperty && p.PropertyType == typeof(string))
                 {
                     var find = tsPropName;
-                    var repl = ToCamelCase(p.Name) + "?: string";
-                    // Jeżeli wolisz 'string | null', zamień powyższe na "?: string | null"
+                    var repl = ToCamelCase(p.Name) + "?: string"; 
                     fixedModel = fixedModel.Replace(find, repl);
                 }
 
-                // Dla Guid?
-                if (hasNullableGuidProperty 
-                    && (p.PropertyType == typeof(Guid?) || p.PropertyType == typeof(Nullable<Guid>)))
+                // Jeśli to Guid? i ma [NullableGuidProperty]
+                if (hasNullableGuidProperty &&
+                    (p.PropertyType == typeof(Guid?) || p.PropertyType == typeof(Nullable<Guid>)))
                 {
                     var find = tsPropName;
-                    var repl = ToCamelCase(p.Name) + "?: string";
+                    var repl = ToCamelCase(p.Name) + "?: string"; 
+                    // lub "?: string | null" jeśli wolisz
                     fixedModel = fixedModel.Replace(find, repl);
                 }
             }
