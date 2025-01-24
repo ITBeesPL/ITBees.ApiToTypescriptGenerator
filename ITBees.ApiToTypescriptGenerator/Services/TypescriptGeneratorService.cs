@@ -221,64 +221,66 @@ export const API_URL = new InjectionToken<string>('API_URL');
         }
 
         private void AddGeneratedModels(
-            TypeScriptGeneratedModels typeScriptGeneratedModels,
-            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
-            HashSet<Type> generatedModelTypes)
+    TypeScriptGeneratedModels typeScriptGeneratedModels,
+    Dictionary<string, TypeScriptFile> generatedTypescriptModels,
+    HashSet<Type> generatedModelTypes)
+{
+    foreach (var tsModel in typeScriptGeneratedModels.GeneratedModels)
+    {
+        var originalType = tsModel.OriginalType;
+        var fixedModel = tsModel.Model;
+
+        // Najpierw fallback: usuń wszystkie '?: string' -> ': string'
+        fixedModel = fixedModel.Replace("?: string", ": string");
+
+        if (originalType != null)
         {
-            foreach (var tsModel in typeScriptGeneratedModels.GeneratedModels)
+            // Pobieramy publiczne properties z oryginalnego typu
+            var props = originalType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
+            foreach (var p in props)
             {
-                var originalType = tsModel.OriginalType;
-                var fixedModel = tsModel.Model;
+                // W TypeScripcie nazwy mogą być camelCase
+                var tsPropName = ToCamelCase(p.Name) + ": string";
 
-                // Najpierw fallback: "?: string" -> ": string"
-                fixedModel = fixedModel.Replace("?: string", ": string");
+                // Atrybuty
+                var hasNullabelParameter = p.GetCustomAttributes()
+                    .Any(a => a.GetType().Name == "NullabelParameterAttribute");
 
-                if (originalType != null)
+                var hasNullableGuidProperty = p.GetCustomAttributes()
+                    .Any(a => a.GetType().Name == "NullableGuidPropertyAttribute");
+
+                // Dla string?
+                if (hasNullabelParameter && p.PropertyType == typeof(string))
                 {
-                    var props = originalType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-                    foreach (var p in props)
-                    {
-                        var tsPropName = ToCamelCase(p.Name) + ": string";
-
-                        // 1) sprawdzamy czy jest [NullabelParameter] (dla string? etc.)
-                        var hasNullabelParameter = p.GetCustomAttributes()
-                            .Any(a => a.GetType().Name == "NullabelParameterAttribute");
-
-                        // 2) sprawdzamy czy jest [NullableGuidProperty] (dla Guid?)
-                        var hasNullableGuidProperty = p.GetCustomAttributes()
-                            .Any(a => a.GetType().Name == "NullableGuidPropertyAttribute");
-
-                        // jeżeli jest [NullableGuidProperty], chcemy "?: string" (albo "?: string | null" – zależnie od potrzeb)
-                        if (hasNullableGuidProperty)
-                        {
-                            var find = tsPropName;
-                            var repl = ToCamelCase(p.Name) + "?: string";
-                            // jeśli wolisz "?: string | null", zrób: 
-                            // var repl = ToCamelCase(p.Name) + "?: string | null";
-                            fixedModel = fixedModel.Replace(find, repl);
-                        }
-
-                        // jeżeli jest [NullabelParameter], także wymuszamy "?: string"
-                        if (hasNullabelParameter)
-                        {
-                            var find2 = tsPropName;
-                            var repl2 = ToCamelCase(p.Name) + "?: string";
-                            fixedModel = fixedModel.Replace(find2, repl2);
-                        }
-                    }
+                    var find = tsPropName;
+                    var repl = ToCamelCase(p.Name) + "?: string";
+                    // Jeżeli wolisz 'string | null', zamień powyższe na "?: string | null"
+                    fixedModel = fixedModel.Replace(find, repl);
                 }
 
-                var file = new TypeScriptFile(fixedModel, tsModel.TypeName);
-                if (!generatedTypescriptModels.ContainsKey(file.TypeName))
+                // Dla Guid?
+                if (hasNullableGuidProperty 
+                    && (p.PropertyType == typeof(Guid?) || p.PropertyType == typeof(Nullable<Guid>)))
                 {
-                    generatedTypescriptModels.Add(file.TypeName, file);
-                    if (tsModel.OriginalType != null)
-                    {
-                        generatedModelTypes.Add(tsModel.OriginalType);
-                    }
+                    var find = tsPropName;
+                    var repl = ToCamelCase(p.Name) + "?: string";
+                    fixedModel = fixedModel.Replace(find, repl);
                 }
             }
         }
+
+        var file = new TypeScriptFile(fixedModel, tsModel.TypeName);
+        if (!generatedTypescriptModels.ContainsKey(file.TypeName))
+        {
+            generatedTypescriptModels.Add(file.TypeName, file);
+            if (tsModel.OriginalType != null)
+            {
+                generatedModelTypes.Add(tsModel.OriginalType);
+            }
+        }
+    }
+}
 
         private void AddEntryToZipArchive(ZipArchive zipArchive, string fileName, string fileContent)
         {
