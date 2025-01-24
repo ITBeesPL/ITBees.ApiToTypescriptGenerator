@@ -230,7 +230,7 @@ export const API_URL = new InjectionToken<string>('API_URL');
                 var originalType = tsModel.OriginalType;
                 var fixedModel = tsModel.Model;
 
-                // Fallback: usuń wszystkie "?: string" → ": string"
+                // Najpierw fallback: "?: string" -> ": string"
                 fixedModel = fixedModel.Replace("?: string", ": string");
 
                 if (originalType != null)
@@ -238,19 +238,32 @@ export const API_URL = new InjectionToken<string>('API_URL');
                     var props = originalType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
                     foreach (var p in props)
                     {
-                        // Wygenerowana nazwa w TS może być z małej litery
-                        // np. "SecretKey" -> "secretKey"
-                        // budujemy pattern do zamiany
                         var tsPropName = ToCamelCase(p.Name) + ": string";
 
-                        // Jeśli atrybut [NullabelParameter] jest obecny, wymuszamy "?: string"
+                        // 1) sprawdzamy czy jest [NullabelParameter] (dla string? etc.)
                         var hasNullabelParameter = p.GetCustomAttributes()
                             .Any(a => a.GetType().Name == "NullabelParameterAttribute");
-                        if (hasNullabelParameter)
+
+                        // 2) sprawdzamy czy jest [NullableGuidProperty] (dla Guid?)
+                        var hasNullableGuidProperty = p.GetCustomAttributes()
+                            .Any(a => a.GetType().Name == "NullableGuidPropertyAttribute");
+
+                        // jeżeli jest [NullableGuidProperty], chcemy "?: string" (albo "?: string | null" – zależnie od potrzeb)
+                        if (hasNullableGuidProperty)
                         {
                             var find = tsPropName;
                             var repl = ToCamelCase(p.Name) + "?: string";
+                            // jeśli wolisz "?: string | null", zrób: 
+                            // var repl = ToCamelCase(p.Name) + "?: string | null";
                             fixedModel = fixedModel.Replace(find, repl);
+                        }
+
+                        // jeżeli jest [NullabelParameter], także wymuszamy "?: string"
+                        if (hasNullabelParameter)
+                        {
+                            var find2 = tsPropName;
+                            var repl2 = ToCamelCase(p.Name) + "?: string";
+                            fixedModel = fixedModel.Replace(find2, repl2);
                         }
                     }
                 }
@@ -301,13 +314,12 @@ export const API_URL = new InjectionToken<string>('API_URL');
             return sb.ToString();
         }
 
-        // Dodatkowa metoda do konwersji nazwy właściwości na camelCase
         private string ToCamelCase(string csharpPropertyName)
         {
             if (string.IsNullOrEmpty(csharpPropertyName))
                 return csharpPropertyName;
             if (csharpPropertyName.Length == 1)
-                return csharpPropertyName.ToLower();
+                return csharpPropertyName.ToLowerInvariant();
             return char.ToLowerInvariant(csharpPropertyName[0]) + csharpPropertyName.Substring(1);
         }
     }
