@@ -32,15 +32,12 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             var partManager = _serviceProvider.GetRequiredService<ApplicationPartManager>();
             var feature = new ControllerFeature();
             partManager.PopulateFeature(feature);
-
             var actionDescriptorCollectionProvider = _serviceProvider.GetRequiredService<IActionDescriptorCollectionProvider>();
             var sb = new StringBuilder();
             var typeScriptGenerator = new TypeScriptGenerator();
-
             var generatedTypescriptModels = new Dictionary<string, TypeScriptFile>();
             var generatedModelTypes = new HashSet<Type>();
             var serviceMethods = new List<ServiceMethod>();
-
             byte[] zipBytes;
             Dictionary<string, string> generatedServices = null;
 
@@ -55,7 +52,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             var controllerName = controllerActionDescriptor.ControllerName;
                             var methodInfo = controllerActionDescriptor.MethodInfo;
                             var httpMethod = GetHttpMethod(controllerActionDescriptor);
-
                             var parameters = new List<ServiceParameter>();
                             foreach (var parameter in controllerActionDescriptor.Parameters)
                             {
@@ -66,7 +62,6 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                 var fromRoute = bindingSource == BindingSource.Path || bindingSource == BindingSource.ModelBinding;
                                 var controllerParameterDescriptor = parameter as ControllerParameterDescriptor;
                                 var parameterInfo = controllerParameterDescriptor?.ParameterInfo;
-
                                 parameters.Add(new ServiceParameter
                                 {
                                     Name = parameter.Name,
@@ -76,13 +71,10 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                     FromRoute = fromRoute,
                                     ParameterInfo = parameterInfo
                                 });
-
                                 GenerateModelsForType(parameterType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
                             }
-
                             var returnType = GetActionReturnType(methodInfo);
                             GenerateModelsForType(returnType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
-
                             serviceMethods.Add(new ServiceMethod
                             {
                                 ControllerName = controllerName,
@@ -93,21 +85,17 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             });
                         }
                     }
-
                     foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
                     {
                         AddEntryToZipArchive(zipArchive, generatedTypescriptModel.FileName, generatedTypescriptModel.FileContent);
                     }
-
                     var serviceGenerator = new TypeScriptServiceGenerator();
                     generatedServices = serviceGenerator.GenerateServices(serviceMethods);
-
                     foreach (var service in generatedServices)
                     {
                         var serviceFileName = $"api-services/{ToKebabCase(service.Key)}.service.ts";
                         AddEntryToZipArchive(zipArchive, serviceFileName, service.Value);
                     }
-
                     var apiUrlTokenFileContent =
 @"import { InjectionToken } from '@angular/core';
 
@@ -115,10 +103,8 @@ export const API_URL = new InjectionToken<string>('API_URL');
 ";
                     AddEntryToZipArchive(zipArchive, "models/api-url.token.ts", apiUrlTokenFileContent);
                 }
-
                 zipBytes = zipMemoryStream.ToArray();
             }
-
             return new AllTypescriptModels(
                 sb.ToString(),
                 zipBytes,
@@ -133,7 +119,6 @@ export const API_URL = new InjectionToken<string>('API_URL');
             var httpMethodAttributes = actionDescriptor.MethodInfo
                 .GetCustomAttributes()
                 .OfType<HttpMethodAttribute>();
-
             if (httpMethodAttributes.Any())
             {
                 method = httpMethodAttributes.First().HttpMethods.First();
@@ -155,7 +140,6 @@ export const API_URL = new InjectionToken<string>('API_URL');
             var producesAttribute = methodInfo
                 .GetCustomAttributes()
                 .FirstOrDefault(x => x.GetType().Name.StartsWith("Produces")) as dynamic;
-
             if (producesAttribute != null && producesAttribute.Type != null)
             {
                 returnType = producesAttribute.Type;
@@ -174,10 +158,8 @@ export const API_URL = new InjectionToken<string>('API_URL');
                 return;
             }
             generatedModelTypes.Add(type);
-
             var typeScriptGeneratedModels = typeScriptGenerator.Generate(type, new TypeScriptGeneratedModels(), false);
             AddGeneratedModels(typeScriptGeneratedModels, generatedTypescriptModels, generatedModelTypes);
-
             if (type.IsGenericType)
             {
                 foreach (var arg in type.GetGenericArguments())
@@ -221,64 +203,50 @@ export const API_URL = new InjectionToken<string>('API_URL');
         }
 
         private void AddGeneratedModels(
-    TypeScriptGeneratedModels typeScriptGeneratedModels,
-    Dictionary<string, TypeScriptFile> generatedTypescriptModels,
-    HashSet<Type> generatedModelTypes)
-{
-    foreach (var tsModel in typeScriptGeneratedModels.GeneratedModels)
-    {
-        var originalType = tsModel.OriginalType;
-        var fixedModel = tsModel.Model;
-
-        // Usuwamy wszystko "?: string" -> ": string" (fallback)
-        fixedModel = fixedModel.Replace("?: string", ": string");
-
-        if (originalType != null)
+            TypeScriptGeneratedModels typeScriptGeneratedModels,
+            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
+            HashSet<Type> generatedModelTypes)
         {
-            var props = originalType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
-            foreach (var p in props)
+            foreach (var tsModel in typeScriptGeneratedModels.GeneratedModels)
             {
-                var tsPropName = ToCamelCase(p.Name) + ": string";
-
-                // Sprawdzamy nazwy atrybutów
-                var hasNullableStringProperty = p.GetCustomAttributes()
-                    .Any(a => a.GetType().Name == "NullableStringPropertyAttribute");
-
-                var hasNullableGuidProperty = p.GetCustomAttributes()
-                    .Any(a => a.GetType().Name == "NullableGuidPropertyAttribute");
-
-                // Jeśli to string? i ma [NullableStringProperty]
-                if (hasNullableStringProperty && p.PropertyType == typeof(string))
+                var originalType = tsModel.OriginalType;
+                var fixedModel = tsModel.Model;
+                fixedModel = fixedModel.Replace("?: string", ": string");
+                if (originalType != null)
                 {
-                    var find = tsPropName;
-                    var repl = ToCamelCase(p.Name) + "?: string"; 
-                    fixedModel = fixedModel.Replace(find, repl);
+                    var props = originalType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+                    foreach (var p in props)
+                    {
+                        var tsPropName = ToCamelCase(p.Name) + ": string";
+                        var hasNullableStringProperty = p.GetCustomAttributes()
+                            .Any(a => a.GetType().Name == "NullableStringPropertyAttribute");
+                        var hasNullableGuidProperty = p.GetCustomAttributes()
+                            .Any(a => a.GetType().Name == "NullableGuidPropertyAttribute");
+                        if (hasNullableStringProperty && p.PropertyType == typeof(string))
+                        {
+                            var find = tsPropName;
+                            var repl = ToCamelCase(p.Name) + "?: string";
+                            fixedModel = fixedModel.Replace(find, repl);
+                        }
+                        if (hasNullableGuidProperty && (p.PropertyType == typeof(Guid?) || p.PropertyType == typeof(Nullable<Guid>)))
+                        {
+                            var find = tsPropName;
+                            var repl = ToCamelCase(p.Name) + "?: string";
+                            fixedModel = fixedModel.Replace(find, repl);
+                        }
+                    }
                 }
-
-                // Jeśli to Guid? i ma [NullableGuidProperty]
-                if (hasNullableGuidProperty &&
-                    (p.PropertyType == typeof(Guid?) || p.PropertyType == typeof(Nullable<Guid>)))
+                var file = new TypeScriptFile(fixedModel, tsModel.TypeName);
+                if (!generatedTypescriptModels.ContainsKey(file.TypeName))
                 {
-                    var find = tsPropName;
-                    var repl = ToCamelCase(p.Name) + "?: string"; 
-                    // lub "?: string | null" jeśli wolisz
-                    fixedModel = fixedModel.Replace(find, repl);
+                    generatedTypescriptModels.Add(file.TypeName, file);
+                    if (tsModel.OriginalType != null)
+                    {
+                        generatedModelTypes.Add(tsModel.OriginalType);
+                    }
                 }
             }
         }
-
-        var file = new TypeScriptFile(fixedModel, tsModel.TypeName);
-        if (!generatedTypescriptModels.ContainsKey(file.TypeName))
-        {
-            generatedTypescriptModels.Add(file.TypeName, file);
-            if (tsModel.OriginalType != null)
-            {
-                generatedModelTypes.Add(tsModel.OriginalType);
-            }
-        }
-    }
-}
 
         private void AddEntryToZipArchive(ZipArchive zipArchive, string fileName, string fileContent)
         {
