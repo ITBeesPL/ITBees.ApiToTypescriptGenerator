@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using ITBees.ApiToTypescriptGenerator.Services.Models;
@@ -11,6 +9,7 @@ namespace ITBees.ApiToTypescriptGenerator
     {
         public TypeScriptGeneratedModels Generate(Type type, TypeScriptGeneratedModels generatedModels, bool skipChildGeneration)
         {
+            Debug.WriteLine($"Generating type script {type.Name}");
             PropertyInfo currentPi = null;
             try
             {
