@@ -6,6 +6,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading.Tasks;
 using ITBees.ApiToTypescriptGenerator.Interfaces;
 using ITBees.ApiToTypescriptGenerator.Services.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -32,14 +33,15 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             var partManager = _serviceProvider.GetRequiredService<ApplicationPartManager>();
             var feature = new ControllerFeature();
             partManager.PopulateFeature(feature);
+
             var actionDescriptorCollectionProvider = _serviceProvider.GetRequiredService<IActionDescriptorCollectionProvider>();
             var sb = new StringBuilder();
             var typeScriptGenerator = new TypeScriptGenerator();
             var generatedTypescriptModels = new Dictionary<string, TypeScriptFile>();
             var generatedModelTypes = new HashSet<Type>();
             var serviceMethods = new List<ServiceMethod>();
-            byte[] zipBytes;
             Dictionary<string, string> generatedServices = null;
+            byte[] zipBytes;
 
             using (var zipMemoryStream = new MemoryStream())
             {
@@ -52,6 +54,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             var controllerName = controllerActionDescriptor.ControllerName;
                             var methodInfo = controllerActionDescriptor.MethodInfo;
                             var httpMethod = GetHttpMethod(controllerActionDescriptor);
+
                             var parameters = new List<ServiceParameter>();
                             foreach (var parameter in controllerActionDescriptor.Parameters)
                             {
@@ -62,19 +65,23 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                 var fromRoute = bindingSource == BindingSource.Path || bindingSource == BindingSource.ModelBinding;
                                 var controllerParameterDescriptor = parameter as ControllerParameterDescriptor;
                                 var parameterInfo = controllerParameterDescriptor?.ParameterInfo;
+
                                 parameters.Add(new ServiceParameter
                                 {
                                     Name = parameter.Name,
-                                    ParameterType = parameter.ParameterType,
+                                    ParameterType = parameterType,
                                     FromBody = fromBody,
                                     FromQuery = fromQuery,
                                     FromRoute = fromRoute,
                                     ParameterInfo = parameterInfo
                                 });
+
                                 GenerateModelsForType(parameterType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
                             }
+
                             var returnType = GetActionReturnType(methodInfo);
                             GenerateModelsForType(returnType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
+
                             serviceMethods.Add(new ServiceMethod
                             {
                                 ControllerName = controllerName,
@@ -85,32 +92,107 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             });
                         }
                     }
+
                     foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
                     {
                         AddEntryToZipArchive(zipArchive, generatedTypescriptModel.FileName, generatedTypescriptModel.FileContent);
                     }
+
                     var serviceGenerator = new TypeScriptServiceGenerator();
                     generatedServices = serviceGenerator.GenerateServices(serviceMethods);
+
                     foreach (var service in generatedServices)
                     {
                         var serviceFileName = $"api-services/{ToKebabCase(service.Key)}.service.ts";
                         AddEntryToZipArchive(zipArchive, serviceFileName, service.Value);
                     }
+
                     var apiUrlTokenFileContent =
 @"import { InjectionToken } from '@angular/core';
 
 export const API_URL = new InjectionToken<string>('API_URL');
 ";
                     AddEntryToZipArchive(zipArchive, "models/api-url.token.ts", apiUrlTokenFileContent);
+
+                    // New part: scan for IScreenView implementations and generate .ts interfaces
+                    GenerateScreenViewInterfaces(zipArchive);
                 }
+
                 zipBytes = zipMemoryStream.ToArray();
             }
+
             return new AllTypescriptModels(
                 sb.ToString(),
                 zipBytes,
                 generatedModelTypes.Select(x => x.Name).ToList(),
                 generatedServices
             );
+        }
+
+        private void GenerateScreenViewInterfaces(ZipArchive zipArchive)
+        {
+            try
+            {
+                var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+
+                var screenViewTypes = assemblies
+                    .SelectMany(a =>
+                    {
+                        try
+                        {
+                            return a.GetTypes();
+                        }
+                        catch
+                        {
+                            return new Type[0];
+                        }
+                    })
+                    .Where(t => typeof(IScreenView).IsAssignableFrom(t)
+                                && t.IsClass
+                                && !t.IsAbstract)
+                    .ToList();
+
+                foreach (var screenViewType in screenViewTypes)
+                {
+                    var interfaceName = $"I{screenViewType.Name}";
+                    var viewActionsProp = screenViewType.GetProperty("ViewActions", BindingFlags.Public | BindingFlags.Instance);
+
+                    if (viewActionsProp == null || viewActionsProp.PropertyType != typeof(List<ViewAction>))
+                        continue;
+
+                    object instance = null;
+                    try
+                    {
+                        instance = Activator.CreateInstance(screenViewType);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    var viewActions = viewActionsProp.GetValue(instance) as List<ViewAction>;
+                    if (viewActions == null)
+                        continue;
+
+                    var sb = new StringBuilder();
+                    sb.AppendLine($"export interface {interfaceName} {{");
+
+                    foreach (var action in viewActions)
+                    {
+                        var actionMethodName = action.GetType().Name;
+                        sb.AppendLine($"    {actionMethodName}();");
+                    }
+
+                    sb.AppendLine("}");
+
+                    var fileName = $"views/{ToKebabCase(screenViewType.Name)}.view.ts";
+                    AddEntryToZipArchive(zipArchive, fileName, sb.ToString());
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARN] GenerateScreenViewInterfaces error: {ex.Message}");
+            }
         }
 
         private string GetHttpMethod(ControllerActionDescriptor actionDescriptor)
@@ -137,13 +219,16 @@ export const API_URL = new InjectionToken<string>('API_URL');
             {
                 returnType = returnType.GetGenericArguments()[0];
             }
+
             var producesAttribute = methodInfo
                 .GetCustomAttributes()
                 .FirstOrDefault(x => x.GetType().Name.StartsWith("Produces")) as dynamic;
+
             if (producesAttribute != null && producesAttribute.Type != null)
             {
                 returnType = producesAttribute.Type;
             }
+
             return returnType;
         }
 
@@ -157,9 +242,12 @@ export const API_URL = new InjectionToken<string>('API_URL');
             {
                 return;
             }
+
             generatedModelTypes.Add(type);
+
             var typeScriptGeneratedModels = typeScriptGenerator.Generate(type, new TypeScriptGeneratedModels(), false);
             AddGeneratedModels(typeScriptGeneratedModels, generatedTypescriptModels, generatedModelTypes);
+
             if (type.IsGenericType)
             {
                 foreach (var arg in type.GetGenericArguments())
@@ -212,6 +300,7 @@ export const API_URL = new InjectionToken<string>('API_URL');
                 var originalType = tsModel.OriginalType;
                 var fixedModel = tsModel.Model;
                 fixedModel = fixedModel.Replace("?: string", ": string");
+
                 if (originalType != null)
                 {
                     var props = originalType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
@@ -222,6 +311,7 @@ export const API_URL = new InjectionToken<string>('API_URL');
                             .Any(a => a.GetType().Name == "NullableStringPropertyAttribute");
                         var hasNullableGuidProperty = p.GetCustomAttributes()
                             .Any(a => a.GetType().Name == "NullableGuidPropertyAttribute");
+
                         if (hasNullableStringProperty && p.PropertyType == typeof(string))
                         {
                             var find = tsPropName;
@@ -236,6 +326,7 @@ export const API_URL = new InjectionToken<string>('API_URL');
                         }
                     }
                 }
+
                 var file = new TypeScriptFile(fixedModel, tsModel.TypeName);
                 if (!generatedTypescriptModels.ContainsKey(file.TypeName))
                 {
@@ -264,6 +355,7 @@ export const API_URL = new InjectionToken<string>('API_URL');
             {
                 return input;
             }
+
             var sb = new StringBuilder();
             sb.Append(char.ToLowerInvariant(input[0]));
             for (int i = 1; i < input.Length; i++)

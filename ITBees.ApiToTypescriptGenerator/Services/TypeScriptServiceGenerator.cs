@@ -1,4 +1,7 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 
@@ -10,6 +13,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
         {
             var services = new Dictionary<string, string>();
             var groupedByController = serviceMethods.GroupBy(x => x.ControllerName);
+
             foreach (var controllerGroup in groupedByController)
             {
                 var controllerName = controllerGroup.Key;
@@ -17,6 +21,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 var serviceCode = GenerateService(controllerName, methods);
                 services.Add(controllerName, serviceCode);
             }
+
             return services;
         }
 
@@ -32,6 +37,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             foreach (var method in methods)
             {
                 var returnTypeName = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
+
                 foreach (var param in method.Parameters)
                 {
                     var paramTypeName = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
@@ -40,7 +46,9 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 
             foreach (var model in modelsToImport)
             {
-                var modelNameWithoutI = model.StartsWith("I") && char.IsUpper(model[1]) ? model.Substring(1) : model;
+                var modelNameWithoutI = model.StartsWith("I") && model.Length > 1 && char.IsUpper(model[1])
+                    ? model.Substring(1)
+                    : model;
                 var fileName = ToKebabCase(modelNameWithoutI);
                 sb.AppendLine($"import {{ {model} }} from '../{fileName}.model';");
             }
@@ -58,6 +66,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 var methodName = httpMethod.ToLower();
                 var returnType = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
                 var returnTypeString = returnType != "void" ? $"Observable<{returnType}>" : "Observable<any>";
+
                 var requiredParameters = new List<string>();
                 var optionalParameters = new List<string>();
 
@@ -67,6 +76,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                     var isOptional = IsNullableType(param.ParameterInfo);
                     var optionalSign = isOptional ? "?" : "";
                     var parameterDeclaration = $"{param.Name}{optionalSign}: {paramType}";
+
                     if (isOptional) optionalParameters.Add(parameterDeclaration);
                     else requiredParameters.Add(parameterDeclaration);
                 }
@@ -91,7 +101,9 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             }
                             else if (tsType.EndsWith("[]"))
                             {
-                                sb.AppendLine($"      {paramName}.forEach(value => {{ params = params.append('{paramName}', value.toString()); }});");
+                                sb.AppendLine($"      {paramName}.forEach(value => {{");
+                                sb.AppendLine($"        params = params.append('{paramName}', value.toString());");
+                                sb.AppendLine("      });");
                             }
                             else
                             {
@@ -118,7 +130,9 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             }
                             else if (tsType.EndsWith("[]"))
                             {
-                                sb.AppendLine($"      {paramName}.forEach(value => {{ params = params.append('{paramName}', value.toString()); }});");
+                                sb.AppendLine($"      {paramName}.forEach(value => {{");
+                                sb.AppendLine($"        params = params.append('{paramName}', value.toString());");
+                                sb.AppendLine("      });");
                             }
                             else
                             {
@@ -165,7 +179,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 
         private bool IsNullableType(ParameterInfo parameter)
         {
-            if (parameter.ParameterType.IsValueType)
+            if (parameter?.ParameterType?.IsValueType == true)
             {
                 return Nullable.GetUnderlyingType(parameter.ParameterType) != null;
             }
@@ -178,27 +192,32 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 return "void";
             }
+
             var t = Nullable.GetUnderlyingType(type) ?? type;
             if (t.Name == "IActionResult" || t.Name.StartsWith("ActionResult"))
             {
                 return "any";
             }
+
             if (IsBuiltInType(t))
             {
                 return GetTypeScriptPrimitiveType(t);
             }
+
             if (t.IsEnum)
             {
                 var e = t.Name;
                 modelsToImport.Add(e);
                 return e;
             }
+
             if (IsCollectionType(t))
             {
                 var itemType = GetCollectionItemType(t);
                 var tsItemType = GetTypeScriptTypeName(itemType, modelsToImport);
                 return tsItemType + "[]";
             }
+
             if (t.IsGenericType)
             {
                 var inter = GetInterfaceName(t);
@@ -209,6 +228,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 modelsToImport.Add(inter);
                 return inter;
             }
+
             var typeName = GetInterfaceName(t);
             modelsToImport.Add(typeName);
             return typeName;
@@ -327,6 +347,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 return input;
             }
+
             var sb = new StringBuilder();
             sb.Append(char.ToLowerInvariant(input[0]));
             for (int i = 1; i < input.Length; i++)
