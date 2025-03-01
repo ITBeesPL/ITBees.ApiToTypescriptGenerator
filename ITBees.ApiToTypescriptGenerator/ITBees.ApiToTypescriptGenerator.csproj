@@ -20,6 +20,12 @@
     <Folder Include="Services\Models\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="Microsoft.AspNetCore.SignalR.Core">
+      <HintPath>..\..\..\..\..\..\Program Files\dotnet\shared\Microsoft.AspNetCore.App\8.0.11\Microsoft.AspNetCore.SignalR.Core.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
 <!--  <ItemGroup>-->
 <!--    <ProjectReference Include="..\..\ITBees.Interfaces\ITBees.Interfaces\ITBees.Interfaces.csproj" />-->
 <!--    <ProjectReference Include="..\..\ITBees.RestfulApiControllers\ITBees.RestfulApiControllers\ITBees.RestfulApiControllers.csproj" />-->
