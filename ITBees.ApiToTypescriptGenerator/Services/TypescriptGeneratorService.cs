@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -34,14 +35,18 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             var feature = new ControllerFeature();
             partManager.PopulateFeature(feature);
 
-            var actionDescriptorCollectionProvider = _serviceProvider.GetRequiredService<IActionDescriptorCollectionProvider>();
+            var actionDescriptorCollectionProvider =
+                _serviceProvider.GetRequiredService<IActionDescriptorCollectionProvider>();
+
             var sb = new StringBuilder();
             var typeScriptGenerator = new TypeScriptGenerator();
             var generatedTypescriptModels = new Dictionary<string, TypeScriptFile>();
             var generatedModelTypes = new HashSet<Type>();
             var serviceMethods = new List<ServiceMethod>();
+
             Dictionary<string, string> generatedServices = null;
             byte[] zipBytes;
+            var addedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             using (var zipMemoryStream = new MemoryStream())
             {
@@ -62,7 +67,8 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                 var bindingSource = parameter.BindingInfo?.BindingSource;
                                 var fromBody = bindingSource == BindingSource.Body;
                                 var fromQuery = bindingSource == BindingSource.Query;
-                                var fromRoute = bindingSource == BindingSource.Path || bindingSource == BindingSource.ModelBinding;
+                                var fromRoute = bindingSource == BindingSource.Path ||
+                                                bindingSource == BindingSource.ModelBinding;
                                 var controllerParameterDescriptor = parameter as ControllerParameterDescriptor;
                                 var parameterInfo = controllerParameterDescriptor?.ParameterInfo;
 
@@ -76,11 +82,13 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                                     ParameterInfo = parameterInfo
                                 });
 
-                                GenerateModelsForType(parameterType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
+                                GenerateModelsForType(parameterType, typeScriptGenerator, generatedTypescriptModels,
+                                    generatedModelTypes);
                             }
 
                             var returnType = GetActionReturnType(methodInfo);
-                            GenerateModelsForType(returnType, typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
+                            GenerateModelsForType(returnType, typeScriptGenerator, generatedTypescriptModels,
+                                generatedModelTypes);
 
                             serviceMethods.Add(new ServiceMethod
                             {
@@ -93,29 +101,33 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                         }
                     }
 
-                    foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
-                    {
-                        AddEntryToZipArchive(zipArchive, generatedTypescriptModel.FileName, generatedTypescriptModel.FileContent);
-                    }
-
                     var serviceGenerator = new TypeScriptServiceGenerator();
                     generatedServices = serviceGenerator.GenerateServices(serviceMethods);
 
                     foreach (var service in generatedServices)
                     {
                         var serviceFileName = $"api-services/{ToKebabCase(service.Key)}.service.ts";
-                        AddEntryToZipArchive(zipArchive, serviceFileName, service.Value);
+                        AddEntryToZipArchive(zipArchive, serviceFileName, service.Value, addedFileNames);
                     }
 
                     var apiUrlTokenFileContent =
-@"import { InjectionToken } from '@angular/core';
+                        @"import { InjectionToken } from '@angular/core';
 
 export const API_URL = new InjectionToken<string>('API_URL');
 ";
-                    AddEntryToZipArchive(zipArchive, "models/api-url.token.ts", apiUrlTokenFileContent);
+                    AddEntryToZipArchive(zipArchive, "models/api-url.token.ts", apiUrlTokenFileContent, addedFileNames);
 
-                    // New part: scan for IScreenView implementations and generate .ts interfaces
-                    GenerateScreenViewInterfaces(zipArchive);
+                    GenerateScreenViewInterfaces(zipArchive, addedFileNames);
+                    GenerateNotificationMethodServices(zipArchive, typeScriptGenerator, generatedTypescriptModels,
+                        generatedModelTypes, addedFileNames);
+                    GenerateAdditionalModels(typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
+                    GenerateExpectedModelTypes(typeScriptGenerator, generatedTypescriptModels, generatedModelTypes);
+
+                    foreach (var generatedTypescriptModel in generatedTypescriptModels.Values)
+                    {
+                        AddEntryToZipArchive(zipArchive, generatedTypescriptModel.FileName,
+                            generatedTypescriptModel.FileContent, addedFileNames);
+                    }
                 }
 
                 zipBytes = zipMemoryStream.ToArray();
@@ -129,12 +141,303 @@ export const API_URL = new InjectionToken<string>('API_URL');
             );
         }
 
-        private void GenerateScreenViewInterfaces(ZipArchive zipArchive)
+        private void GenerateNotificationMethodServices(
+            ZipArchive zipArchive,
+            TypeScriptGenerator typeScriptGenerator,
+            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
+            HashSet<Type> generatedModelTypes,
+            HashSet<string> addedFileNames)
         {
             try
             {
                 var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+                var notificationMethodTypes = assemblies
+                    .SelectMany(a =>
+                    {
+                        try
+                        {
+                            return a.GetTypes();
+                        }
+                        catch
+                        {
+                            return new Type[0];
+                        }
+                    })
+                    .Where(t => typeof(IHubMethod).IsAssignableFrom(t)
+                                && t.IsClass && !t.IsAbstract)
+                    .ToList();
 
+                foreach (var methodType in notificationMethodTypes)
+                {
+                    var nameProperty = methodType.GetProperty("Name");
+                    var instance = Activator.CreateInstance(methodType);
+                    var rawMethodName = nameProperty != null
+                        ? nameProperty.GetValue(instance)?.ToString()
+                        : methodType.Name;
+
+                    if (string.IsNullOrEmpty(rawMethodName))
+                        rawMethodName = methodType.Name;
+
+                    var executeMethod = methodType.GetMethod("ExecuteAsync");
+                    var expectedModelAttr = executeMethod?.GetCustomAttributes(true)
+                        .FirstOrDefault(x => x.GetType().Name == "ExpectedModelTypeAttribute");
+
+                    var tsParameterType = "any";
+                    string importModelName = null;
+                    if (expectedModelAttr != null)
+                    {
+                        var attrTypeProp = expectedModelAttr.GetType().GetProperty("Type");
+                        var csharpModelType = attrTypeProp?.GetValue(expectedModelAttr) as Type;
+                        if (csharpModelType != null)
+                        {
+                            GenerateModelsForType(csharpModelType, typeScriptGenerator, generatedTypescriptModels,
+                                generatedModelTypes);
+                            var csharpModelName = csharpModelType.Name;
+                            tsParameterType = "I" + csharpModelName;
+                            importModelName = tsParameterType;
+                        }
+                    }
+
+                    var isCommand = typeof(IHubCommand).IsAssignableFrom(methodType);
+                    var isListener = typeof(IHubListener).IsAssignableFrom(methodType);
+
+                    // Wyznaczamy suffix i wstępnie format nazwy pliku
+                    var suffix = isListener ? "listener-base" : (isCommand ? "command-base" : "");
+                    var methodName = rawMethodName;
+
+                    // Usunięcie "Command"/"Listener" z nazwy metody, by nie dublować w pliku
+                    if (isCommand && methodName.EndsWith("Command", StringComparison.OrdinalIgnoreCase))
+                    {
+                        methodName = methodName[..^"Command".Length];
+                    }
+
+                    if (isListener && methodName.EndsWith("Listener", StringComparison.OrdinalIgnoreCase))
+                    {
+                        methodName = methodName[..^"Listener".Length];
+                    }
+
+                    // Nazwa pliku
+                    var fileName = $"websocket-services/{ToKebabCase(methodName)}-{suffix}.ts";
+
+                    // Budujemy nazwę klasy bazowej
+                    // 1) Usuwamy "Method"
+                    var baseClassName = methodType.Name.Replace("Method", "", StringComparison.OrdinalIgnoreCase);
+                    // 2) Usuwamy "Command"/"Listener" (o ile jest)
+                    if (isCommand && baseClassName.EndsWith("Command", StringComparison.OrdinalIgnoreCase))
+                    {
+                        baseClassName = baseClassName[..^"Command".Length];
+                    }
+
+                    if (isListener && baseClassName.EndsWith("Listener", StringComparison.OrdinalIgnoreCase))
+                    {
+                        baseClassName = baseClassName[..^"Listener".Length];
+                    }
+
+                    // 3) Doklejamy "CommandBase"/"ListenerBase" zależnie od suffix
+                    string className;
+                    if (isCommand)
+                        className = $"{baseClassName}CommandBase";
+                    else if (isListener)
+                        className = $"{baseClassName}ListenerBase";
+                    else
+                        className = baseClassName;
+
+                    // Poprawa na styl PascalCase – np. jeżeli mamy "ScannedQrCodecommandbase",
+                    // to chcemy "ScannedQrCodeCommandBase". Można użyć np. małego helpera:
+                    className = ToPascalCase(className);
+
+                    var importPart = "";
+                    if (importModelName != null)
+                    {
+                        var modelNameForFile = importModelName;
+                        if (modelNameForFile.StartsWith("I") && modelNameForFile.Length > 1 &&
+                            char.IsUpper(modelNameForFile[1]))
+                        {
+                            modelNameForFile = modelNameForFile.Substring(1);
+                        }
+
+                        var modelFileName = ToKebabCase(modelNameForFile);
+                        importPart = $"import {{ {importModelName} }} from '../{modelFileName}.model';\n";
+                    }
+
+                    // Różnicujemy generowaną klasę zależnie od tego, czy to "command" czy "listener"
+                    string fileContent;
+
+                    if (isCommand)
+                    {
+                        // Komenda – brak mechanizmu "on(...)"
+                        // Wstawiamy np. metodę "send" do wysyłania danych do huba
+                        fileContent = $@"{importPart}import {{ HubConnection }} from '@microsoft/signalr';
+
+export abstract class {className} {{
+    protected methodName = '{rawMethodName}';
+    protected hubConnection: HubConnection;
+
+    protected constructor(hubConnection: HubConnection) {{
+        this.hubConnection = hubConnection;
+    }}
+
+    getName() {{
+        return this.methodName;
+    }}
+
+    public send(payload: {tsParameterType}) {{
+        return this.hubConnection.invoke(this.methodName, payload);
+    }}
+}}";
+                    }
+                    else if (isListener)
+                    {
+                        // Listener – tu zostaje logika rejestrowania onMessage
+                        fileContent = $@"{importPart}import {{ HubConnection }} from '@microsoft/signalr';
+
+export abstract class {className} {{
+    protected methodName = '{rawMethodName}';
+    protected hubConnection: HubConnection;
+
+    protected constructor(hubConnection: HubConnection) {{
+        this.hubConnection = hubConnection;
+        this.hubConnection.on(this.methodName, (data: any) => {{
+            this.onMessage(data);
+        }});
+    }}
+
+    getName() {{
+        return this.methodName;
+    }}
+
+    protected abstract onMessage(data: {tsParameterType}): void;
+}}";
+                    }
+                    else
+                    {
+                        // Gdyby były jakieś inne przypadki, można tu wstawić default.
+                        // Ale w praktyce mamy command / listener / nic.
+                        fileContent = $@"import {{ HubConnection }} from '@microsoft/signalr';
+
+export abstract class {className} {{
+    protected methodName = '{rawMethodName}';
+    protected hubConnection: HubConnection;
+
+    protected constructor(hubConnection: HubConnection) {{
+        this.hubConnection = hubConnection;
+    }}
+
+    getName() {{
+        return this.methodName;
+    }}
+}}";
+                    }
+
+                    AddEntryToZipArchive(zipArchive, fileName, fileContent, addedFileNames);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private string ToPascalCase(string input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return input;
+
+            // Rozdziel ewentualne segmenty i sklej, np. "scannedQrCodecommandbase" -> ["scanned", "qr", "codecommandbase"] -> ...
+            // Dla prostoty można użyć bardziej podstawowego, literowego podejścia, np. zbudować dużą literę na starcie i zacząć nowy segment po wykryciu uppercase.
+            // Tutaj – minimalna namiastka:
+
+            var sb = new StringBuilder();
+            bool capitalize = true;
+            foreach (var c in input)
+            {
+                if (char.IsLetterOrDigit(c))
+                {
+                    sb.Append(capitalize ? char.ToUpperInvariant(c) : c);
+                    capitalize = false;
+                }
+                else
+                {
+                    capitalize = true;
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private void GenerateAdditionalModels(
+            TypeScriptGenerator typeScriptGenerator,
+            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
+            HashSet<Type> generatedModelTypes)
+        {
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            foreach (var assembly in assemblies)
+            {
+                try
+                {
+                    foreach (var type in assembly.GetTypes().Where(t =>
+                                 t.IsClass &&
+                                 (t.Name.EndsWith("Im") ||
+                                  t.Name.EndsWith("Vm") ||
+                                  t.Name.EndsWith("Um") ||
+                                  t.Name.EndsWith("Dm")) &&
+                                 t.GetCustomAttributes().Any(attr =>
+                                     attr.GetType().Name == "InputModelTypeAttribute" ||
+                                     attr.GetType().Name == "ExpectedModelTypeAttribute") &&
+                                 !IsBuiltInType(t)))
+                    {
+                        Debug.WriteLine($"GenerateAdditionalModels : {type.Name}");
+                        GenerateModelsForType(type, typeScriptGenerator, generatedTypescriptModels,
+                            generatedModelTypes);
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private void GenerateExpectedModelTypes(
+            TypeScriptGenerator typeScriptGenerator,
+            Dictionary<string, TypeScriptFile> generatedTypescriptModels,
+            HashSet<Type> generatedModelTypes)
+        {
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            foreach (var assembly in assemblies)
+            {
+                try
+                {
+                    foreach (var type in assembly.GetTypes())
+                    {
+                        var methods =
+                            type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static);
+                        foreach (var method in methods)
+                        {
+                            var expectedAttr = method.GetCustomAttributes(true)
+                                .FirstOrDefault(x => x.GetType().Name == "ExpectedModelTypeAttribute");
+                            if (expectedAttr != null)
+                            {
+                                var attrTypeProp = expectedAttr.GetType().GetProperty("Type");
+                                var csharpModelType = attrTypeProp?.GetValue(expectedAttr) as Type;
+                                if (csharpModelType != null)
+                                {
+                                    GenerateModelsForType(csharpModelType, typeScriptGenerator,
+                                        generatedTypescriptModels, generatedModelTypes);
+                                }
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private void GenerateScreenViewInterfaces(ZipArchive zipArchive, HashSet<string> addedFileNames)
+        {
+            try
+            {
+                var assemblies = AppDomain.CurrentDomain.GetAssemblies();
                 var screenViewTypes = assemblies
                     .SelectMany(a =>
                     {
@@ -147,15 +450,14 @@ export const API_URL = new InjectionToken<string>('API_URL');
                             return new Type[0];
                         }
                     })
-                    .Where(t => typeof(IScreenView).IsAssignableFrom(t)
-                                && t.IsClass
-                                && !t.IsAbstract)
+                    .Where(t => typeof(IScreenView).IsAssignableFrom(t) && t.IsClass && !t.IsAbstract)
                     .ToList();
 
                 foreach (var screenViewType in screenViewTypes)
                 {
                     var interfaceName = $"I{screenViewType.Name}";
-                    var viewActionsProp = screenViewType.GetProperty("ViewActions", BindingFlags.Public | BindingFlags.Instance);
+                    var viewActionsProp =
+                        screenViewType.GetProperty("ViewActions", BindingFlags.Public | BindingFlags.Instance);
 
                     if (viewActionsProp == null || viewActionsProp.PropertyType != typeof(List<ViewAction>))
                         continue;
@@ -171,12 +473,10 @@ export const API_URL = new InjectionToken<string>('API_URL');
                     }
 
                     var viewActions = viewActionsProp.GetValue(instance) as List<ViewAction>;
-                    if (viewActions == null)
-                        continue;
+                    if (viewActions == null) continue;
 
                     var sb = new StringBuilder();
                     sb.AppendLine($"export interface {interfaceName} {{");
-
                     foreach (var action in viewActions)
                     {
                         var actionMethodName = action.GetType().Name;
@@ -186,44 +486,43 @@ export const API_URL = new InjectionToken<string>('API_URL');
                     sb.AppendLine("}");
 
                     var fileName = $"views/{ToKebabCase(screenViewType.Name)}.view.ts";
-                    AddEntryToZipArchive(zipArchive, fileName, sb.ToString());
+                    AddEntryToZipArchive(zipArchive, fileName, sb.ToString(), addedFileNames);
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine($"[WARN] GenerateScreenViewInterfaces error: {ex.Message}");
             }
         }
 
         private string GetHttpMethod(ControllerActionDescriptor actionDescriptor)
         {
             var method = "GET";
-            var httpMethodAttributes = actionDescriptor.MethodInfo
-                .GetCustomAttributes()
-                .OfType<HttpMethodAttribute>();
+            var httpMethodAttributes = actionDescriptor.MethodInfo.GetCustomAttributes().OfType<HttpMethodAttribute>();
             if (httpMethodAttributes.Any())
             {
                 method = httpMethodAttributes.First().HttpMethods.First();
             }
+
             return method;
         }
 
         private Type GetActionReturnType(MethodInfo methodInfo)
         {
             var returnType = methodInfo.ReturnType;
+
             if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
             {
                 returnType = returnType.GetGenericArguments()[0];
             }
+
             if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(ActionResult<>))
             {
                 returnType = returnType.GetGenericArguments()[0];
             }
 
-            var producesAttribute = methodInfo
-                .GetCustomAttributes()
-                .FirstOrDefault(x => x.GetType().Name.StartsWith("Produces")) as dynamic;
-
+            var producesAttribute =
+                methodInfo.GetCustomAttributes()
+                    .FirstOrDefault(x => x.GetType().Name.StartsWith("Produces")) as dynamic;
             if (producesAttribute != null && producesAttribute.Type != null)
             {
                 returnType = producesAttribute.Type;
@@ -238,13 +537,9 @@ export const API_URL = new InjectionToken<string>('API_URL');
             Dictionary<string, TypeScriptFile> generatedTypescriptModels,
             HashSet<Type> generatedModelTypes)
         {
-            if (type == null || IsBuiltInType(type) || generatedModelTypes.Contains(type))
-            {
-                return;
-            }
+            if (type == null || IsBuiltInType(type) || generatedModelTypes.Contains(type)) return;
 
             generatedModelTypes.Add(type);
-
             var typeScriptGeneratedModels = typeScriptGenerator.Generate(type, new TypeScriptGeneratedModels(), false);
             AddGeneratedModels(typeScriptGeneratedModels, generatedTypescriptModels, generatedModelTypes);
 
@@ -266,10 +561,10 @@ export const API_URL = new InjectionToken<string>('API_URL');
         {
             var t = Nullable.GetUnderlyingType(type) ?? type;
             return t.IsPrimitive
-                || t == typeof(string)
-                || t == typeof(decimal)
-                || t == typeof(DateTime)
-                || t == typeof(Guid);
+                   || t == typeof(string)
+                   || t == typeof(decimal)
+                   || t == typeof(DateTime)
+                   || t == typeof(Guid);
         }
 
         private bool IsCollectionType(Type type)
@@ -283,10 +578,12 @@ export const API_URL = new InjectionToken<string>('API_URL');
             {
                 return type.GetElementType();
             }
+
             if (type.IsGenericType)
             {
                 return type.GetGenericArguments().First();
             }
+
             return typeof(object);
         }
 
@@ -297,65 +594,47 @@ export const API_URL = new InjectionToken<string>('API_URL');
         {
             foreach (var tsModel in typeScriptGeneratedModels.GeneratedModels)
             {
-                var originalType = tsModel.OriginalType;
                 var fixedModel = tsModel.Model;
                 fixedModel = fixedModel.Replace("?: string", ": string");
 
-                if (originalType != null)
+                var modelFileName = ToKebabCase(tsModel.TypeName);
+                if (tsModel.TypeName.StartsWith("I") && tsModel.TypeName.Length > 1 &&
+                    char.IsUpper(tsModel.TypeName[1]))
                 {
-                    var props = originalType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-                    foreach (var p in props)
-                    {
-                        var tsPropName = ToCamelCase(p.Name) + ": string";
-                        var hasNullableStringProperty = p.GetCustomAttributes()
-                            .Any(a => a.GetType().Name == "NullableStringPropertyAttribute");
-                        var hasNullableGuidProperty = p.GetCustomAttributes()
-                            .Any(a => a.GetType().Name == "NullableGuidPropertyAttribute");
-
-                        if (hasNullableStringProperty && p.PropertyType == typeof(string))
-                        {
-                            var find = tsPropName;
-                            var repl = ToCamelCase(p.Name) + "?: string";
-                            fixedModel = fixedModel.Replace(find, repl);
-                        }
-                        if (hasNullableGuidProperty && (p.PropertyType == typeof(Guid?) || p.PropertyType == typeof(Nullable<Guid>)))
-                        {
-                            var find = tsPropName;
-                            var repl = ToCamelCase(p.Name) + "?: string";
-                            fixedModel = fixedModel.Replace(find, repl);
-                        }
-                    }
+                    modelFileName = ToKebabCase(tsModel.TypeName.Substring(1));
                 }
 
-                var file = new TypeScriptFile(fixedModel, tsModel.TypeName);
+                modelFileName = $"{modelFileName}.model.ts";
+
+                var file = new TypeScriptFile(fixedModel, tsModel.TypeName, modelFileName);
                 if (!generatedTypescriptModels.ContainsKey(file.TypeName))
                 {
                     generatedTypescriptModels.Add(file.TypeName, file);
-                    if (tsModel.OriginalType != null)
-                    {
-                        generatedModelTypes.Add(tsModel.OriginalType);
-                    }
                 }
             }
         }
 
-        private void AddEntryToZipArchive(ZipArchive zipArchive, string fileName, string fileContent)
+        private void AddEntryToZipArchive(
+            ZipArchive zipArchive,
+            string fileName,
+            string fileContent,
+            HashSet<string> addedFileNames)
         {
+            if (addedFileNames.Contains(fileName)) return;
+
             var zipEntry = zipArchive.CreateEntry(fileName);
             using (var entryStream = zipEntry.Open())
             using (var streamWriter = new StreamWriter(entryStream))
             {
                 streamWriter.Write(fileContent);
             }
+
+            addedFileNames.Add(fileName);
         }
 
         private string ToKebabCase(string input)
         {
-            if (string.IsNullOrEmpty(input))
-            {
-                return input;
-            }
-
+            if (string.IsNullOrEmpty(input)) return input;
             var sb = new StringBuilder();
             sb.Append(char.ToLowerInvariant(input[0]));
             for (int i = 1; i < input.Length; i++)
@@ -371,16 +650,8 @@ export const API_URL = new InjectionToken<string>('API_URL');
                     sb.Append(c);
                 }
             }
-            return sb.ToString();
-        }
 
-        private string ToCamelCase(string csharpPropertyName)
-        {
-            if (string.IsNullOrEmpty(csharpPropertyName))
-                return csharpPropertyName;
-            if (csharpPropertyName.Length == 1)
-                return csharpPropertyName.ToLowerInvariant();
-            return char.ToLowerInvariant(csharpPropertyName[0]) + csharpPropertyName.Substring(1);
+            return sb.ToString();
         }
     }
 }
