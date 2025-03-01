@@ -179,8 +179,10 @@ export const API_URL = new InjectionToken<string>('API_URL');
                         rawMethodName = methodType.Name;
 
                     var executeMethod = methodType.GetMethod("ExecuteAsync");
+                    // Sprawdzamy zarówno ExpectedModelTypeAttribute jak i ExpectedOutputModelTypeAttribute
                     var expectedModelAttr = executeMethod?.GetCustomAttributes(true)
-                        .FirstOrDefault(x => x.GetType().Name == "ExpectedModelTypeAttribute");
+                        .FirstOrDefault(x => x.GetType().Name == "ExpectedModelTypeAttribute" ||
+                                             x.GetType().Name == "ExpectedOutputModelTypeAttribute");
 
                     var tsParameterType = "any";
                     string importModelName = null;
@@ -242,8 +244,7 @@ export const API_URL = new InjectionToken<string>('API_URL');
                     else
                         className = baseClassName;
 
-                    // Poprawa na styl PascalCase – np. jeżeli mamy "ScannedQrCodecommandbase",
-                    // to chcemy "ScannedQrCodeCommandBase". Można użyć np. małego helpera:
+                    // Poprawa na styl PascalCase
                     className = ToPascalCase(className);
 
                     var importPart = "";
@@ -260,7 +261,6 @@ export const API_URL = new InjectionToken<string>('API_URL');
                         importPart = $"import {{ {importModelName} }} from '../{modelFileName}.model';\n";
                     }
 
-                    // Różnicujemy generowaną klasę zależnie od tego, czy to "command" czy "listener"
                     string fileContent;
 
                     if (isCommand)
@@ -288,7 +288,7 @@ export abstract class {className} {{
                     }
                     else if (isListener)
                     {
-                        // Listener – tu zostaje logika rejestrowania onMessage
+                        // Listener – logika rejestracji onMessage z typem parametru z atrybutu
                         fileContent = $@"{importPart}import {{ HubConnection }} from '@microsoft/signalr';
 
 export abstract class {className} {{
@@ -297,7 +297,7 @@ export abstract class {className} {{
 
     protected constructor(hubConnection: HubConnection) {{
         this.hubConnection = hubConnection;
-        this.hubConnection.on(this.methodName, (data: any) => {{
+        this.hubConnection.on(this.methodName, (data: {tsParameterType}) => {{
             this.onMessage(data);
         }});
     }}
@@ -311,8 +311,6 @@ export abstract class {className} {{
                     }
                     else
                     {
-                        // Gdyby były jakieś inne przypadki, można tu wstawić default.
-                        // Ale w praktyce mamy command / listener / nic.
                         fileContent = $@"import {{ HubConnection }} from '@microsoft/signalr';
 
 export abstract class {className} {{
@@ -341,10 +339,6 @@ export abstract class {className} {{
         {
             if (string.IsNullOrEmpty(input))
                 return input;
-
-            // Rozdziel ewentualne segmenty i sklej, np. "scannedQrCodecommandbase" -> ["scanned", "qr", "codecommandbase"] -> ...
-            // Dla prostoty można użyć bardziej podstawowego, literowego podejścia, np. zbudować dużą literę na starcie i zacząć nowy segment po wykryciu uppercase.
-            // Tutaj – minimalna namiastka:
 
             var sb = new StringBuilder();
             bool capitalize = true;
@@ -382,7 +376,8 @@ export abstract class {className} {{
                                   t.Name.EndsWith("Dm")) &&
                                  t.GetCustomAttributes().Any(attr =>
                                      attr.GetType().Name == "InputModelTypeAttribute" ||
-                                     attr.GetType().Name == "ExpectedModelTypeAttribute") &&
+                                     attr.GetType().Name == "ExpectedModelTypeAttribute" ||
+                                     attr.GetType().Name == "ExpectedOutputModelTypeAttribute") &&
                                  !IsBuiltInType(t)))
                     {
                         Debug.WriteLine($"GenerateAdditionalModels : {type.Name}");
@@ -413,7 +408,8 @@ export abstract class {className} {{
                         foreach (var method in methods)
                         {
                             var expectedAttr = method.GetCustomAttributes(true)
-                                .FirstOrDefault(x => x.GetType().Name == "ExpectedModelTypeAttribute");
+                                .FirstOrDefault(x => x.GetType().Name == "ExpectedModelTypeAttribute" ||
+                                                     x.GetType().Name == "ExpectedOutputModelTypeAttribute");
                             if (expectedAttr != null)
                             {
                                 var attrTypeProp = expectedAttr.GetType().GetProperty("Type");
