@@ -282,7 +282,7 @@ export abstract class {className} {{
     }}
 
     public send(payload: {tsParameterType}) {{
-        return this.hubConnection.invoke(this.methodName, payload);
+        return this.hubConnection.invoke('InvokeMethod', this.methodName, payload);
     }}
 }}";
                     }
