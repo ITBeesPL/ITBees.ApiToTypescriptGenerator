@@ -476,7 +476,7 @@ export abstract class {className} {{
                     foreach (var action in viewActions)
                     {
                         var actionMethodName = action.GetType().Name;
-                        sb.AppendLine($"    {actionMethodName}();");
+                        sb.AppendLine($"    {actionMethodName}(): void;");
                     }
 
                     sb.AppendLine("}");
