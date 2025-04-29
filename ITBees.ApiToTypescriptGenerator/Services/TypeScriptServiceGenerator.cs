@@ -36,28 +36,24 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             var modelsToImport = new HashSet<string>();
             foreach (var method in methods)
             {
-                var returnTypeName = GetTypeScriptTypeName(method.ReturnType, modelsToImport);
-
+                GetTypeScriptTypeName(method.ReturnType, modelsToImport);
                 foreach (var param in method.Parameters)
-                {
-                    var paramTypeName = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
-                }
+                    GetTypeScriptTypeName(param.ParameterType, modelsToImport);
             }
 
             foreach (var model in modelsToImport)
             {
-                var modelNameWithoutI = model.StartsWith("I") && model.Length > 1 && char.IsUpper(model[1])
-                    ? model.Substring(1)
+                var modelName = model.StartsWith("I") && model.Length > 1 && char.IsUpper(model[1])
+                    ? model[1..]
                     : model;
-                var fileName = ToKebabCase(modelNameWithoutI);
-                sb.AppendLine($"import {{ {model} }} from '../{fileName}.model';");
+                sb.AppendLine($"import {{ {model} }} from '../{ToKebabCase(modelName)}.model';");
             }
 
             sb.AppendLine("@Injectable({ providedIn: 'root' })");
             sb.AppendLine($"export class {controllerName}Service {{");
             sb.AppendLine("  private readonly baseUrl: string;");
             sb.AppendLine("  constructor(private http: HttpClient, @Inject(API_URL) private apiUrl: string) {");
-            sb.AppendLine("    this.baseUrl = `${this.apiUrl}/" + controllerName + "`;");
+            sb.AppendLine($"    this.baseUrl = `${{this.apiUrl}}/{controllerName}`;");
             sb.AppendLine("  }");
 
             foreach (var method in methods)
@@ -69,97 +65,61 @@ namespace ITBees.ApiToTypescriptGenerator.Services
 
                 var requiredParameters = new List<string>();
                 var optionalParameters = new List<string>();
-
                 foreach (var param in method.Parameters)
                 {
-                    var paramType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
-                    var isOptional = IsNullableType(param.ParameterInfo);
-                    var optionalSign = isOptional ? "?" : "";
-                    var parameterDeclaration = $"{param.Name}{optionalSign}: {paramType}";
-
-                    if (isOptional) optionalParameters.Add(parameterDeclaration);
-                    else requiredParameters.Add(parameterDeclaration);
+                    var ts = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
+                    var opt = IsNullableType(param.ParameterInfo) ? "?" : "";
+                    var decl = $"{param.Name}{opt}: {ts}";
+                    if (opt == "?") optionalParameters.Add(decl);
+                    else requiredParameters.Add(decl);
                 }
 
-                var parametersString = string.Join(", ", requiredParameters.Concat(optionalParameters));
-                sb.AppendLine($"  {methodName}({parametersString}): {returnTypeString} {{");
+                var paramsDecl = string.Join(", ", requiredParameters.Concat(optionalParameters));
+                sb.AppendLine($"  {methodName}({paramsDecl}): {returnTypeString} {{");
                 sb.AppendLine("    const headers = this.createHeaders();");
 
-                if (httpMethod == "GET")
+                if (httpMethod == "GET" || httpMethod == "DELETE")
                 {
                     sb.AppendLine("    let params = new HttpParams();");
                     foreach (var param in method.Parameters)
                     {
-                        if (!param.FromBody)
+                        if (param.FromBody) continue;
+                        var name = param.Name;
+                        var ts = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
+                        sb.AppendLine($"    if ({name} !== undefined && {name} !== null) {{");
+                        if (ts.EndsWith("[]"))
                         {
-                            var paramName = param.Name;
-                            var tsType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
-                            sb.AppendLine($"    if ({paramName} !== undefined && {paramName} !== null) {{");
-                            if (tsType == "string" || tsType == "number" || tsType == "boolean")
-                            {
-                                sb.AppendLine($"      params = params.set('{paramName}', {paramName}.toString());");
-                            }
-                            else if (tsType.EndsWith("[]"))
-                            {
-                                sb.AppendLine($"      {paramName}.forEach(value => {{");
-                                sb.AppendLine($"        params = params.append('{paramName}', value.toString());");
-                                sb.AppendLine("      });");
-                            }
-                            else
-                            {
-                                sb.AppendLine($"      params = params.set('{paramName}', JSON.stringify({paramName}));");
-                            }
-                            sb.AppendLine("    }");
+                            sb.AppendLine(
+                                $"      {name}.forEach(v => params = params.append('{name}', v.toString()));");
                         }
-                    }
-                    sb.AppendLine($"    return this.http.get<{returnType}>(this.baseUrl, {{ headers, params }});");
-                }
-                else if (httpMethod == "DELETE")
-                {
-                    sb.AppendLine("    let params = new HttpParams();");
-                    foreach (var param in method.Parameters)
-                    {
-                        if (!param.FromBody)
+                        else if (ts == "string" || ts == "number" || ts == "boolean")
                         {
-                            var paramName = param.Name;
-                            var tsType = GetTypeScriptTypeName(param.ParameterType, modelsToImport);
-                            sb.AppendLine($"    if ({paramName} !== undefined && {paramName} !== null) {{");
-                            if (tsType == "string" || tsType == "number" || tsType == "boolean")
-                            {
-                                sb.AppendLine($"      params = params.set('{paramName}', {paramName}.toString());");
-                            }
-                            else if (tsType.EndsWith("[]"))
-                            {
-                                sb.AppendLine($"      {paramName}.forEach(value => {{");
-                                sb.AppendLine($"        params = params.append('{paramName}', value.toString());");
-                                sb.AppendLine("      });");
-                            }
-                            else
-                            {
-                                sb.AppendLine($"      params = params.set('{paramName}', JSON.stringify({paramName}));");
-                            }
-                            sb.AppendLine("    }");
+                            sb.AppendLine($"      params = params.set('{name}', {name}.toString());");
                         }
+                        else
+                        {
+                            sb.AppendLine($"      params = params.set('{name}', JSON.stringify({name}));");
+                        }
+
+                        sb.AppendLine("    }");
                     }
-                    var opts = new List<string> { "headers", "params" };
-                    var bodyParam = method.Parameters.FirstOrDefault(x => x.FromBody);
-                    if (bodyParam != null)
-                    {
-                        opts.Add($"body: {bodyParam.Name}");
-                    }
-                    sb.AppendLine($"    return this.http.delete<{returnType}>(this.baseUrl, {{ {string.Join(", ", opts)} }});");
-                }
-                else if (httpMethod == "POST" || httpMethod == "PUT")
-                {
-                    var bodyParam = method.Parameters.FirstOrDefault(x => x.FromBody);
-                    if (bodyParam != null)
-                    {
-                        sb.AppendLine($"    return this.http.{httpMethod.ToLower()}<{returnType}>(this.baseUrl, {bodyParam.Name}, {{ headers }});");
-                    }
+
+                    if (httpMethod == "GET")
+                        sb.AppendLine($"    return this.http.get<{returnType}>(this.baseUrl, {{ headers, params }});");
                     else
                     {
-                        sb.AppendLine($"    return this.http.{httpMethod.ToLower()}<{returnType}>(this.baseUrl, null, {{ headers }});");
+                        var opts = new List<string> { "headers", "params" };
+                        var bodyParam = method.Parameters.FirstOrDefault(x => x.FromBody);
+                        if (bodyParam != null) opts.Add($"body: {bodyParam.Name}");
+                        sb.AppendLine(
+                            $"    return this.http.delete<{returnType}>(this.baseUrl, {{ {string.Join(", ", opts)} }});");
                     }
+                }
+                else
+                {
+                    var body = method.Parameters.FirstOrDefault(x => x.FromBody)?.Name ?? "null";
+                    sb.AppendLine(
+                        $"    return this.http.{httpMethod.ToLower()}<{returnType}>(this.baseUrl, {body}, {{ headers }});");
                 }
 
                 sb.AppendLine("  }");
@@ -168,9 +128,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             sb.AppendLine("  private createHeaders(): HttpHeaders {");
             sb.AppendLine("    let headers = new HttpHeaders();");
             sb.AppendLine("    const token = localStorage.getItem('authToken');");
-            sb.AppendLine("    if (token) {");
-            sb.AppendLine("      headers = headers.set('Authorization', `Bearer ${token}`);");
-            sb.AppendLine("    }");
+            sb.AppendLine("    if (token) headers = headers.set('Authorization', `Bearer ${token}`);");
             sb.AppendLine("    return headers;");
             sb.AppendLine("  }");
             sb.AppendLine("}");
@@ -183,6 +141,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 return Nullable.GetUnderlyingType(parameter.ParameterType) != null;
             }
+
             return false;
         }
 
@@ -225,6 +184,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 {
                     GetTypeScriptTypeName(arg, modelsToImport);
                 }
+
                 modelsToImport.Add(inter);
                 return inter;
             }
@@ -245,6 +205,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 return true;
             }
+
             return false;
         }
 
@@ -254,18 +215,22 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 return false;
             }
+
             if (type.IsArray)
             {
                 return true;
             }
+
             if (typeof(IEnumerable<>).IsAssignableFrom(type.GetTypeInfo()))
             {
                 return true;
             }
+
             if (typeof(IEnumerable).IsAssignableFrom(type))
             {
                 return true;
             }
+
             return false;
         }
 
@@ -275,10 +240,12 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 return type.GetElementType();
             }
+
             if (type.IsGenericType)
             {
                 return type.GetGenericArguments().FirstOrDefault() ?? typeof(object);
             }
+
             return typeof(object);
         }
 
@@ -292,6 +259,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                 {
                     baseName = baseName.Substring(1);
                 }
+
                 var genArgs = type.GetGenericArguments();
                 var appended = string.Join("", genArgs.Select(a =>
                 {
@@ -300,6 +268,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                     {
                         argName = argName.Substring(1);
                     }
+
                     return argName;
                 }));
                 return "I" + baseName + appended;
@@ -311,6 +280,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                     n = "I" + n;
                 }
             }
+
             return n;
         }
 
@@ -321,6 +291,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 return "string";
             }
+
             if (t == typeof(int)
                 || t == typeof(long)
                 || t == typeof(short)
@@ -330,14 +301,17 @@ namespace ITBees.ApiToTypescriptGenerator.Services
             {
                 return "number";
             }
+
             if (t == typeof(bool))
             {
                 return "boolean";
             }
+
             if (t == typeof(DateTime))
             {
                 return "Date";
             }
+
             return "any";
         }
 
@@ -363,6 +337,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                     sb.Append(c);
                 }
             }
+
             return sb.ToString();
         }
     }
