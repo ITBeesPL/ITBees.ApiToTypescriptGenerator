@@ -59,6 +59,9 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                     {
                         if (actionDescriptor is ControllerActionDescriptor controllerActionDescriptor)
                         {
+                            _logger.LogInformation("Processing action: " +
+                                                   $"{controllerActionDescriptor.ControllerName}/" +
+                                                   $"{controllerActionDescriptor.ActionName}");
                             var controllerName = controllerActionDescriptor.ControllerName;
                             var methodInfo = controllerActionDescriptor.MethodInfo;
                             var httpMethod = GetHttpMethod(controllerActionDescriptor);
