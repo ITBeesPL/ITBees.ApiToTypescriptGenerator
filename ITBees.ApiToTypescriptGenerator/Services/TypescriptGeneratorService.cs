@@ -94,6 +94,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             }
 
                             var returnType = GetActionReturnType(methodInfo);
+                            _logger.LogInformation("\tProcessing return type: " + returnType.Name);
                             GenerateModelsForType(returnType, typeScriptGenerator, generatedTypescriptModels,
                                 generatedModelTypes);
 
