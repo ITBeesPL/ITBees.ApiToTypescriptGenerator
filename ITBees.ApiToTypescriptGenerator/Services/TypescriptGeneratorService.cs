@@ -17,16 +17,19 @@ using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace ITBees.ApiToTypescriptGenerator.Services
 {
     public class TypescriptGeneratorService : ITypescriptGeneratorService
     {
         private readonly IServiceProvider _serviceProvider;
+        private readonly ILogger<TypescriptGeneratorService> _logger;
 
         public TypescriptGeneratorService(IServiceProvider serviceProvider)
         {
             _serviceProvider = serviceProvider;
+            _logger = _serviceProvider.GetService<ILogger<TypescriptGeneratorService>>()!;
         }
 
         public AllTypescriptModels GetAllControllersWithTypescriptModels()
@@ -380,13 +383,15 @@ export abstract class {className} {{
                                      attr.GetType().Name == "ExpectedOutputModelTypeAttribute") &&
                                  !IsBuiltInType(t)))
                     {
-                        Debug.WriteLine($"GenerateAdditionalModels : {type.Name}");
+                        _logger.LogInformation($"GenerateAdditionalModels : {type.Name}");
                         GenerateModelsForType(type, typeScriptGenerator, generatedTypescriptModels,
                             generatedModelTypes);
                     }
                 }
-                catch
+                catch (Exception e)
                 {
+                    _logger.LogError("Error in GenerateAdditionalModels for assembly: " + assembly.FullName);
+                    _logger.LogError("Error message  " + e.Message, e);
                 }
             }
         }
