@@ -69,6 +69,7 @@ namespace ITBees.ApiToTypescriptGenerator.Services
                             var parameters = new List<ServiceParameter>();
                             foreach (var parameter in controllerActionDescriptor.Parameters)
                             {
+                                _logger.LogInformation("\tProcessing parameter: " + parameter.Name);
                                 var parameterType = parameter.ParameterType;
                                 var bindingSource = parameter.BindingInfo?.BindingSource;
                                 var fromBody = bindingSource == BindingSource.Body;
@@ -545,6 +546,7 @@ export abstract class {className} {{
 
             generatedModelTypes.Add(type);
             var typeScriptGeneratedModels = typeScriptGenerator.Generate(type, new TypeScriptGeneratedModels(), false);
+            _logger.LogInformation("Generated models for type: " + type.Name);
             AddGeneratedModels(typeScriptGeneratedModels, generatedTypescriptModels, generatedModelTypes);
 
             if (type.IsGenericType)
