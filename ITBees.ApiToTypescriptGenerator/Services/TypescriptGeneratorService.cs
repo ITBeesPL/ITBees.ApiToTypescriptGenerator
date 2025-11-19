@@ -375,7 +375,11 @@ export abstract class {className} {{
             Dictionary<string, TypeScriptFile> generatedTypescriptModels,
             HashSet<Type> generatedModelTypes)
         {
-            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies() .Where(a =>
+                !a.IsDynamic &&
+                !a.FullName.StartsWith("System.", StringComparison.OrdinalIgnoreCase) &&
+                !a.FullName.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase));
+            
             foreach (var assembly in assemblies)
             {
                 try
