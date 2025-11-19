@@ -185,6 +185,8 @@ export const API_URL = new InjectionToken<string>('API_URL');
 
                     if (string.IsNullOrEmpty(rawMethodName))
                         rawMethodName = methodType.Name;
+                    
+                    _logger.LogInformation("Processing notification method: " + rawMethodName);
 
                     var executeMethod = methodType.GetMethod("ExecuteAsync");
                     // Sprawdzamy zarówno ExpectedModelTypeAttribute jak i ExpectedOutputModelTypeAttribute
@@ -338,8 +340,10 @@ export abstract class {className} {{
                     AddEntryToZipArchive(zipArchive, fileName, fileContent, addedFileNames);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogError("Error in GenerateNotificationMethodServices");
+                _logger.LogError("Error :" + ex.Message, ex);
             }
         }
 
