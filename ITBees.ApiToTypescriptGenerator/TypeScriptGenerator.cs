@@ -18,6 +18,12 @@ namespace ITBees.ApiToTypescriptGenerator
                     throw new Exception($"Type is null.");
                 }
 
+                // Without this a cyclic model graph recurses until StackOverflow, which kills the whole process.
+                if (!generatedModels.TryStartGenerating(type))
+                {
+                    return generatedModels;
+                }
+
                 if (type.Name == "FileContentResult")
                 {
                     var interfaceNameFileContentResult = "IFileContentResult";

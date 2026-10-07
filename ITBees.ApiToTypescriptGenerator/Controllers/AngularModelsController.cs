@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ITBees.ApiToTypescriptGenerator.Controllers;
 
+[GeneratorEndpointGate]
 public class AngularModelsController : RestfulControllerBase<AngularModelsController>
 {
     private readonly ITypescriptGeneratorService _generatorService;

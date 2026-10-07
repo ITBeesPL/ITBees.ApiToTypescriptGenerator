@@ -5,6 +5,7 @@ using ITBees.ApiToTypescriptGenerator.Interfaces;
 
 namespace ITBees.ApiToTypescriptGenerator.Controllers;
 
+[GeneratorEndpointGate]
 public class AllControllersToTypescriptController : RestfulControllerBase<AllControllersToTypescriptController>
 {
     private readonly IServiceProvider _serviceProvider;

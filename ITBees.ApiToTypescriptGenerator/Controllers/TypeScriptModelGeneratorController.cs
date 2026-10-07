@@ -6,6 +6,7 @@ namespace ITBees.ApiToTypescriptGenerator.Controllers
 {
 
     //[ApiExplorerSettings(IgnoreApi = true)]
+    [GeneratorEndpointGate]
     public class TypeScriptModelGeneratorController : RestfulControllerBase<TypeScriptModelGeneratorController>
     {
         private readonly ILogger<TypeScriptModelGeneratorController> _logger;
